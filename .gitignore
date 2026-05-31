@@ -1,0 +1,21 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Local runtime / secrets
+state.json
+*.state.json
+config.json
+.env
+
+# Data cache
+data/
+*.csv
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
