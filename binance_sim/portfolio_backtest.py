@@ -432,7 +432,7 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
         report.equity_times.append(int(t))
         report.equity_curve.append(mtm)
         exposure_sum += len(positions)
-        if report.threshold_cross is None and capital >= vol_threshold:
+        if vol_sizing and report.threshold_cross is None and capital >= vol_threshold:
             report.threshold_cross = int(t)
 
     # close anything still open at the final price (EOD)
