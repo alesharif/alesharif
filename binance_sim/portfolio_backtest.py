@@ -257,6 +257,7 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
         exit_model: str = "optimistic",
         vol_sizing: bool = False, vol_threshold: float = 30_000.0,
         vol_size_pct: float = 0.001, source: str = "api",
+        capital_cap: Optional[float] = None,
         log=print) -> BacktestReport:
     """Replay the strategy over history.
 
@@ -408,7 +409,10 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
                 cands.sort(key=lambda x: x[0])
             slots = S.MAX_CONCURRENT - len(positions)
             for sym, price, atr, _vol in cands[:slots]:
-                cap_eighth = base_notional if fixed_notional else capital * S.POSITION_PCT
+                # cap the capital used for sizing (profits still accumulate,
+                # but the largest position is frozen at capital_cap/8)
+                sizing_cap = capital if capital_cap is None else min(capital, capital_cap)
+                cap_eighth = base_notional if fixed_notional else sizing_cap * S.POSITION_PCT
                 if vol_sizing and capital >= vol_threshold and np.isfinite(_vol):
                     # 0.1% of the coin's daily quote volume, capped at portfolio/8
                     pos_usd = min(vol_size_pct * _vol, cap_eighth)
@@ -495,6 +499,9 @@ def main(argv=None) -> int:
     p.add_argument("--source", choices=["api", "archive"], default="api",
                    help="'api' = live-listed symbols (survivorship-biased); "
                         "'archive' = point-in-time universe incl. delisted coins")
+    p.add_argument("--capital-cap", type=float, default=None,
+                   help="Cap the capital used for sizing ($); profits still accrue "
+                        "but the largest position is frozen at cap/8 (e.g. 1000000 -> $125k)")
     p.add_argument("--out", default=None, help="Directory to write trades.csv / equity.csv")
     args = p.parse_args(argv)
 
@@ -518,7 +525,7 @@ def main(argv=None) -> int:
                  slippage=args.slippage, fixed_notional=args.fixed_notional,
                  exit_model=args.exit_model, vol_sizing=args.vol_sizing,
                  vol_threshold=args.vol_threshold, vol_size_pct=args.vol_size_pct,
-                 source=args.source)
+                 source=args.source, capital_cap=args.capital_cap)
     print("\n" + report.summary())
 
     if args.out:
