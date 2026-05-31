@@ -256,7 +256,7 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
         slippage: float = 0.0, fixed_notional: bool = False,
         exit_model: str = "optimistic",
         vol_sizing: bool = False, vol_threshold: float = 30_000.0,
-        vol_size_pct: float = 0.001,
+        vol_size_pct: float = 0.001, source: str = "api",
         log=print) -> BacktestReport:
     """Replay the strategy over history.
 
@@ -280,20 +280,32 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
 
     # 1) load + featurise every symbol -------------------------------
     per_symbol: Dict[str, pd.DataFrame] = {}
-    log(f"Loading {len(symbols)} symbols...")
-    for i, sym in enumerate(symbols, 1):
-        df = fetch_klines_range(sym, fetch_from, end_ms)
-        if df is None or len(df) < S.MIN_HISTORY:
-            continue
-        df = S.compute_features(df)
-        df = S.attach_entry_signal(df)
-        df = df.set_index("close_time")
-        per_symbol[sym] = df
-        if i % 25 == 0:
-            log(f"  loaded {i}/{len(symbols)}  (usable: {len(per_symbol)})")
+    if source == "archive":
+        # survivorship-free: candles for delisted coins included for their life
+        from . import pit_universe as PIT
+        raw = PIT.prefetch_universe(symbols, fetch_from, end_ms, log=log)
+        log(f"Featurising {len(raw)} symbols...")
+        for sym, df in raw.items():
+            df = S.compute_features(df)
+            df = S.attach_entry_signal(df)
+            per_symbol[sym] = df.set_index("close_time")
+    else:
+        log(f"Loading {len(symbols)} symbols...")
+        for i, sym in enumerate(symbols, 1):
+            df = fetch_klines_range(sym, fetch_from, end_ms)
+            if df is None or len(df) < S.MIN_HISTORY:
+                continue
+            df = S.compute_features(df)
+            df = S.attach_entry_signal(df)
+            per_symbol[sym] = df.set_index("close_time")
+            if i % 25 == 0:
+                log(f"  loaded {i}/{len(symbols)}  (usable: {len(per_symbol)})")
     log(f"Usable symbols: {len(per_symbol)}")
     if not per_symbol:
         raise RuntimeError("No usable symbol data — check connectivity / date range.")
+
+    # last candle time per symbol — used to force-close on delisting
+    last_seen: Dict[str, int] = {s: int(df.index.max()) for s, df in per_symbol.items()}
 
     # 2) master 4h timeline within [start, end] ----------------------
     times = set()
@@ -321,7 +333,18 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
                 continue  # opened this bar; no same-bar exit
             df = per_symbol[sym]
             if t not in df.index:
-                continue  # gap in this symbol's data
+                # past this symbol's last candle => delisted while held: close it
+                if t > last_seen[sym]:
+                    last_px = float(df.iloc[-1]["close"])
+                    net = (last_px / pos.entry_price - 1) * 100 - cost_rt
+                    pnl = pos.pos_usd * net / 100.0
+                    capital += pnl
+                    report.trades.append(ClosedTrade(
+                        symbol=sym, entry_time=pos.entry_time, exit_time=last_seen[sym],
+                        entry_price=pos.entry_price, exit_price=last_px,
+                        net_pct=net, pnl=pnl, outcome="DELIST"))
+                    del positions[sym]
+                continue  # otherwise a transient gap; skip this bar
             row = df.loc[t]
             high = float(row["high"]); low = float(row["low"]); close = float(row["close"])
             atr = pos.entry_atr
@@ -469,6 +492,9 @@ def main(argv=None) -> int:
                    help="Capital level ($) at which volume sizing activates")
     p.add_argument("--vol-size-pct", type=float, default=0.001,
                    help="Fraction of a coin's daily volume per trade (0.001 = 0.1%%)")
+    p.add_argument("--source", choices=["api", "archive"], default="api",
+                   help="'api' = live-listed symbols (survivorship-biased); "
+                        "'archive' = point-in-time universe incl. delisted coins")
     p.add_argument("--out", default=None, help="Directory to write trades.csv / equity.csv")
     args = p.parse_args(argv)
 
@@ -477,13 +503,22 @@ def main(argv=None) -> int:
     explicit = [s.strip() for s in args.symbols.split(",")] if args.symbols else None
 
     print("Resolving universe...")
-    symbols = get_universe(max_symbols=args.max_symbols, explicit=explicit)
-    print(f"Universe: {len(symbols)} symbols")
+    if explicit:
+        symbols = explicit
+    elif args.source == "archive":
+        from . import pit_universe as PIT
+        symbols = PIT.list_all_usdt_symbols()
+        if args.max_symbols:
+            symbols = symbols[:args.max_symbols]
+    else:
+        symbols = get_universe(max_symbols=args.max_symbols, explicit=explicit)
+    print(f"Universe: {len(symbols)} symbols  (source={args.source})")
 
     report = run(symbols, start_ms, end_ms, rank=args.rank, max_hold=args.max_hold,
                  slippage=args.slippage, fixed_notional=args.fixed_notional,
                  exit_model=args.exit_model, vol_sizing=args.vol_sizing,
-                 vol_threshold=args.vol_threshold, vol_size_pct=args.vol_size_pct)
+                 vol_threshold=args.vol_threshold, vol_size_pct=args.vol_size_pct,
+                 source=args.source)
     print("\n" + report.summary())
 
     if args.out:
