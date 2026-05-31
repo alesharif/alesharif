@@ -248,7 +248,23 @@ class BacktestReport:
 
 def run(symbols: List[str], start_ms: int, end_ms: int,
         rank: str = "vol", max_hold: int = 0,
+        slippage: float = 0.0, fixed_notional: bool = False,
+        exit_model: str = "optimistic",
         log=print) -> BacktestReport:
+    """Replay the strategy over history.
+
+    slippage       : extra round-trip cost (%) added on top of fees, to model
+                     imperfect fills (tight ATR stops on alts slip).
+    fixed_notional : size every position at INITIAL_CAPITAL*POSITION_PCT
+                     instead of 12.5% of *current* capital. Removes the
+                     compounding explosion and isolates the raw per-trade edge.
+    exit_model     : 'optimistic' raises the trailing stop with the bar high
+                     before testing the low (best case). 'pessimistic' tests
+                     the low against the pre-bar stop first (worst case). The
+                     truth lies between; reality needs the live 30s feed.
+    """
+    cost_rt = S.FEE_RT + slippage
+    base_notional = S.INITIAL_CAPITAL * S.POSITION_PCT
     fetch_from = start_ms - WARMUP_BARS * FOUR_H_MS
 
     # 1) load + featurise every symbol -------------------------------
@@ -300,26 +316,38 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
             atr = pos.entry_atr
             pos.bars_held += 1
 
-            # update trailing using the bar high (optimistic-trailing model)
-            if high > pos.peak:
-                pos.peak = high
-                if pos.peak - pos.entry_price >= S.ACTIVATE_ATR * atr:
-                    pos.trailing_on = True
-                    new_sl = pos.peak - S.TRAIL_ATR * atr
-                    if new_sl > pos.sl_price:
-                        pos.sl_price = new_sl
-
             exit_price = None
             outcome = None
-            if low <= pos.sl_price:
-                exit_price = pos.sl_price
-                outcome = "TRAIL" if pos.trailing_on else "SL"
-            elif max_hold and pos.bars_held >= max_hold:
+
+            def _raise_trailing():
+                if high > pos.peak:
+                    pos.peak = high
+                    if pos.peak - pos.entry_price >= S.ACTIVATE_ATR * atr:
+                        pos.trailing_on = True
+                        new_sl = pos.peak - S.TRAIL_ATR * atr
+                        if new_sl > pos.sl_price:
+                            pos.sl_price = new_sl
+
+            if exit_model == "pessimistic":
+                # worst case: the dip hits the pre-bar stop before any rally
+                if low <= pos.sl_price:
+                    exit_price = pos.sl_price
+                    outcome = "TRAIL" if pos.trailing_on else "SL"
+                else:
+                    _raise_trailing()
+            else:
+                # optimistic: rally lifts the stop, then test the dip
+                _raise_trailing()
+                if low <= pos.sl_price:
+                    exit_price = pos.sl_price
+                    outcome = "TRAIL" if pos.trailing_on else "SL"
+
+            if exit_price is None and max_hold and pos.bars_held >= max_hold:
                 exit_price = close
                 outcome = "MAXHOLD"
 
             if exit_price is not None:
-                net = (exit_price / pos.entry_price - 1) * 100 - S.FEE_RT
+                net = (exit_price / pos.entry_price - 1) * 100 - cost_rt
                 pnl = pos.pos_usd * net / 100.0
                 capital += pnl
                 report.trades.append(ClosedTrade(
@@ -346,7 +374,7 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
                 cands.sort(key=lambda x: x[0])
             slots = S.MAX_CONCURRENT - len(positions)
             for sym, price, atr, _vol in cands[:slots]:
-                pos_usd = capital * S.POSITION_PCT
+                pos_usd = base_notional if fixed_notional else capital * S.POSITION_PCT
                 positions[sym] = Position(
                     symbol=sym, entry_time=int(t), entry_price=price, entry_atr=atr,
                     pos_usd=pos_usd, peak=price, sl_price=price - S.SL_ATR * atr)
@@ -357,7 +385,7 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
             df = per_symbol[sym]
             if t in df.index:
                 px = float(df.loc[t]["close"])
-                mtm += pos.pos_usd * ((px / pos.entry_price - 1) - S.FEE_RT / 100.0)
+                mtm += pos.pos_usd * ((px / pos.entry_price - 1) - cost_rt / 100.0)
         report.equity_times.append(int(t))
         report.equity_curve.append(mtm)
         exposure_sum += len(positions)
@@ -368,7 +396,7 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
         df = per_symbol[sym]
         if last_t in df.index:
             px = float(df.loc[last_t]["close"])
-            net = (px / pos.entry_price - 1) * 100 - S.FEE_RT
+            net = (px / pos.entry_price - 1) * 100 - cost_rt
             pnl = pos.pos_usd * net / 100.0
             capital += pnl
             report.trades.append(ClosedTrade(
@@ -411,6 +439,12 @@ def main(argv=None) -> int:
                    help="How to pick among more candidates than free slots")
     p.add_argument("--max-hold", type=int, default=0,
                    help="Close after N bars (0 = disabled, matches live bot)")
+    p.add_argument("--slippage", type=float, default=0.0,
+                   help="Extra round-trip cost %% on top of fees (realism)")
+    p.add_argument("--fixed-notional", action="store_true",
+                   help="Size each trade at a fixed $ (no compounding) to show the raw edge")
+    p.add_argument("--exit-model", choices=["optimistic", "pessimistic"], default="optimistic",
+                   help="Trailing-fill assumption within a 4h bar")
     p.add_argument("--out", default=None, help="Directory to write trades.csv / equity.csv")
     args = p.parse_args(argv)
 
@@ -422,7 +456,9 @@ def main(argv=None) -> int:
     symbols = get_universe(max_symbols=args.max_symbols, explicit=explicit)
     print(f"Universe: {len(symbols)} symbols")
 
-    report = run(symbols, start_ms, end_ms, rank=args.rank, max_hold=args.max_hold)
+    report = run(symbols, start_ms, end_ms, rank=args.rank, max_hold=args.max_hold,
+                 slippage=args.slippage, fixed_notional=args.fixed_notional,
+                 exit_model=args.exit_model)
     print("\n" + report.summary())
 
     if args.out:
