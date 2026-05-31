@@ -190,6 +190,7 @@ class BacktestReport:
     trades: List[ClosedTrade] = field(default_factory=list)
     btc_buy_hold: Optional[float] = None
     avg_exposure: float = 0.0
+    threshold_cross: Optional[int] = None  # first time capital hit vol_threshold
 
     @property
     def total_return(self) -> float:
@@ -235,6 +236,10 @@ class BacktestReport:
         lines += [
             f"Max drawdown      : {self.max_drawdown * 100:.2f}%",
             f"Avg open positions: {self.avg_exposure:.2f} / {S.MAX_CONCURRENT}",
+        ]
+        if self.threshold_cross is not None:
+            lines.append(f"Vol-sizing kicked : {_fmt(self.threshold_cross)} (capital hit threshold)")
+        lines += [
             "-" * 56,
             f"Closed trades     : {n}",
             f"Win rate          : {wr:.1f}%  ({len(wins)}W / {len(losses)}L)",
@@ -250,6 +255,8 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
         rank: str = "vol", max_hold: int = 0,
         slippage: float = 0.0, fixed_notional: bool = False,
         exit_model: str = "optimistic",
+        vol_sizing: bool = False, vol_threshold: float = 30_000.0,
+        vol_size_pct: float = 0.001,
         log=print) -> BacktestReport:
     """Replay the strategy over history.
 
@@ -262,6 +269,10 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
                      before testing the low (best case). 'pessimistic' tests
                      the low against the pre-bar stop first (worst case). The
                      truth lies between; reality needs the live 30s feed.
+    vol_sizing     : once capital >= vol_threshold, size each entry at
+                     vol_size_pct of the coin's daily quote volume, capped at
+                     portfolio/8 (a liquidity-aware sizing that curbs the
+                     compounding explosion on thin coins).
     """
     cost_rt = S.FEE_RT + slippage
     base_notional = S.INITIAL_CAPITAL * S.POSITION_PCT
@@ -374,7 +385,12 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
                 cands.sort(key=lambda x: x[0])
             slots = S.MAX_CONCURRENT - len(positions)
             for sym, price, atr, _vol in cands[:slots]:
-                pos_usd = base_notional if fixed_notional else capital * S.POSITION_PCT
+                cap_eighth = base_notional if fixed_notional else capital * S.POSITION_PCT
+                if vol_sizing and capital >= vol_threshold and np.isfinite(_vol):
+                    # 0.1% of the coin's daily quote volume, capped at portfolio/8
+                    pos_usd = min(vol_size_pct * _vol, cap_eighth)
+                else:
+                    pos_usd = cap_eighth
                 positions[sym] = Position(
                     symbol=sym, entry_time=int(t), entry_price=price, entry_atr=atr,
                     pos_usd=pos_usd, peak=price, sl_price=price - S.SL_ATR * atr)
@@ -389,6 +405,8 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
         report.equity_times.append(int(t))
         report.equity_curve.append(mtm)
         exposure_sum += len(positions)
+        if report.threshold_cross is None and capital >= vol_threshold:
+            report.threshold_cross = int(t)
 
     # close anything still open at the final price (EOD)
     last_t = timeline[-1]
@@ -445,6 +463,12 @@ def main(argv=None) -> int:
                    help="Size each trade at a fixed $ (no compounding) to show the raw edge")
     p.add_argument("--exit-model", choices=["optimistic", "pessimistic"], default="optimistic",
                    help="Trailing-fill assumption within a 4h bar")
+    p.add_argument("--vol-sizing", action="store_true",
+                   help="Switch to volume-based sizing once capital >= --vol-threshold")
+    p.add_argument("--vol-threshold", type=float, default=30_000.0,
+                   help="Capital level ($) at which volume sizing activates")
+    p.add_argument("--vol-size-pct", type=float, default=0.001,
+                   help="Fraction of a coin's daily volume per trade (0.001 = 0.1%%)")
     p.add_argument("--out", default=None, help="Directory to write trades.csv / equity.csv")
     args = p.parse_args(argv)
 
@@ -458,7 +482,8 @@ def main(argv=None) -> int:
 
     report = run(symbols, start_ms, end_ms, rank=args.rank, max_hold=args.max_hold,
                  slippage=args.slippage, fixed_notional=args.fixed_notional,
-                 exit_model=args.exit_model)
+                 exit_model=args.exit_model, vol_sizing=args.vol_sizing,
+                 vol_threshold=args.vol_threshold, vol_size_pct=args.vol_size_pct)
     print("\n" + report.summary())
 
     if args.out:
