@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 import time
@@ -150,6 +151,7 @@ class Position:
     pos_usd: float
     peak: float
     sl_price: float
+    entry_qv: float = 0.0       # quote volume of the entry bar (for impact cost)
     trailing_on: bool = False
     bars_held: int = 0
 
@@ -258,6 +260,7 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
         vol_sizing: bool = False, vol_threshold: float = 30_000.0,
         vol_size_pct: float = 0.001, source: str = "api",
         capital_cap: Optional[float] = None,
+        slip_atr: float = 0.0, slip_impact: float = 0.0,
         log=print) -> BacktestReport:
     """Replay the strategy over history.
 
@@ -278,6 +281,24 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
     cost_rt = S.FEE_RT + slippage
     base_notional = S.INITIAL_CAPITAL * S.POSITION_PCT
     fetch_from = start_ms - WARMUP_BARS * FOUR_H_MS
+
+    def _impact(pos_usd: float, bar_qv: float) -> float:
+        """Market-impact cost (% of price) for trading pos_usd in a bar that
+        did bar_qv quote volume. Square-root model, capped at 100% participation."""
+        if slip_impact <= 0 or not bar_qv or bar_qv <= 0:
+            return 0.0
+        participation = min(pos_usd / bar_qv, 1.0)
+        return slip_impact * math.sqrt(participation) * 100.0
+
+    def _net_pct(entry: float, exit: float, pos_usd: float, atr: float,
+                 entry_qv: float, exit_qv: float, is_stop: bool) -> float:
+        """Realistic net return (%) after fees, spread, market impact and
+        (on stop fills) volatility slippage."""
+        net = (exit / entry - 1) * 100 - cost_rt
+        net -= _impact(pos_usd, entry_qv) + _impact(pos_usd, exit_qv)
+        if is_stop and slip_atr > 0 and exit > 0:
+            net -= slip_atr * (atr / exit) * 100.0   # adverse fill beyond the stop
+        return net
 
     # 1) load + featurise every symbol -------------------------------
     per_symbol: Dict[str, pd.DataFrame] = {}
@@ -340,8 +361,11 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
             if t not in df.index:
                 # past this symbol's last candle => delisted while held: close it
                 if t > last_seen[sym]:
-                    last_px = float(df.iloc[-1]["close"])
-                    net = (last_px / pos.entry_price - 1) * 100 - cost_rt
+                    last_row = df.iloc[-1]
+                    last_px = float(last_row["close"])
+                    net = _net_pct(pos.entry_price, last_px, pos.pos_usd, pos.entry_atr,
+                                   pos.entry_qv, float(last_row.get("quote_av", 0.0)),
+                                   is_stop=False)
                     pnl = pos.pos_usd * net / 100.0
                     capital += pnl
                     report.trades.append(ClosedTrade(
@@ -386,7 +410,9 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
                 outcome = "MAXHOLD"
 
             if exit_price is not None:
-                net = (exit_price / pos.entry_price - 1) * 100 - cost_rt
+                is_stop = outcome in ("SL", "TRAIL")
+                net = _net_pct(pos.entry_price, exit_price, pos.pos_usd, atr,
+                               pos.entry_qv, float(row["quote_av"]), is_stop=is_stop)
                 pnl = pos.pos_usd * net / 100.0
                 capital += pnl
                 report.trades.append(ClosedTrade(
@@ -406,13 +432,13 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
                 row = df.loc[t]
                 if bool(row["entry_signal"]):
                     cands.append((sym, float(row["close"]), float(row["atr"]),
-                                  float(row["vol_pit"])))
+                                  float(row["vol_pit"]), float(row["quote_av"])))
             if rank == "vol":
                 cands.sort(key=lambda x: x[3], reverse=True)
             else:
                 cands.sort(key=lambda x: x[0])
             slots = S.MAX_CONCURRENT - len(positions)
-            for sym, price, atr, _vol in cands[:slots]:
+            for sym, price, atr, _vol, _qv in cands[:slots]:
                 # cap the capital used for sizing (profits still accumulate,
                 # but the largest position is frozen at capital_cap/8)
                 sizing_cap = capital if capital_cap is None else min(capital, capital_cap)
@@ -424,7 +450,8 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
                     pos_usd = cap_eighth
                 positions[sym] = Position(
                     symbol=sym, entry_time=int(t), entry_price=price, entry_atr=atr,
-                    pos_usd=pos_usd, peak=price, sl_price=price - S.SL_ATR * atr)
+                    pos_usd=pos_usd, peak=price, sl_price=price - S.SL_ATR * atr,
+                    entry_qv=_qv)
 
         # --- mark-to-market equity ---------------------------------
         mtm = capital
@@ -444,8 +471,10 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
     for sym, pos in list(positions.items()):
         df = per_symbol[sym]
         if last_t in df.index:
-            px = float(df.loc[last_t]["close"])
-            net = (px / pos.entry_price - 1) * 100 - cost_rt
+            last_row = df.loc[last_t]
+            px = float(last_row["close"])
+            net = _net_pct(pos.entry_price, px, pos.pos_usd, pos.entry_atr,
+                           pos.entry_qv, float(last_row["quote_av"]), is_stop=False)
             pnl = pos.pos_usd * net / 100.0
             capital += pnl
             report.trades.append(ClosedTrade(
@@ -457,7 +486,9 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
     report.avg_exposure = exposure_sum / max(1, len(timeline))
 
     # BTC buy & hold over the same window, for reference
-    btc = per_symbol.get("BTCUSDT") or per_symbol.get("BTC-USDT")
+    btc = per_symbol.get("BTCUSDT")
+    if btc is None:
+        btc = per_symbol.get("BTC-USDT")
     if btc is not None:
         window = btc[(btc.index >= start_ms) & (btc.index <= end_ms)]
         if len(window) > 1:
@@ -507,6 +538,12 @@ def main(argv=None) -> int:
     p.add_argument("--capital-cap", type=float, default=None,
                    help="Cap the capital used for sizing ($); profits still accrue "
                         "but the largest position is frozen at cap/8 (e.g. 1000000 -> $125k)")
+    p.add_argument("--slip-atr", type=float, default=0.0,
+                   help="Volatility slippage on stop fills, as a fraction of ATR "
+                        "(e.g. 0.10 = filled 0.1*ATR worse than the stop)")
+    p.add_argument("--slip-impact", type=float, default=0.0,
+                   help="Market-impact coefficient; cost/side = coef*sqrt(pos/bar_volume) "
+                        "(e.g. 0.10)")
     p.add_argument("--out", default=None, help="Directory to write trades.csv / equity.csv")
     args = p.parse_args(argv)
 
@@ -535,7 +572,8 @@ def main(argv=None) -> int:
                  slippage=args.slippage, fixed_notional=args.fixed_notional,
                  exit_model=args.exit_model, vol_sizing=args.vol_sizing,
                  vol_threshold=args.vol_threshold, vol_size_pct=args.vol_size_pct,
-                 source=args.source, capital_cap=args.capital_cap)
+                 source=args.source, capital_cap=args.capital_cap,
+                 slip_atr=args.slip_atr, slip_impact=args.slip_impact)
     print("\n" + report.summary())
 
     if args.out:

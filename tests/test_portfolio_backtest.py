@@ -34,6 +34,7 @@ def _bars(prices, start_t=0, atr=1.0, vol=5_000_000.0):
         "close": [p[0] for p in prices],
         "atr": [atr] * n,
         "vol_pit": [vol] * n,
+        "quote_av": [vol] * n,
         "entry_signal": [False] * n,
     })
     return df.set_index("close_time")
