@@ -281,10 +281,14 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
 
     # 1) load + featurise every symbol -------------------------------
     per_symbol: Dict[str, pd.DataFrame] = {}
-    if source == "archive":
-        # survivorship-free: candles for delisted coins included for their life
-        from . import pit_universe as PIT
-        raw = PIT.prefetch_universe(symbols, fetch_from, end_ms, log=log)
+    if source in ("archive", "okx"):
+        if source == "archive":
+            # survivorship-free: delisted coins included for their trading life
+            from . import pit_universe as DS
+        else:
+            # cross-exchange validation on OKX spot data
+            from . import okx_source as DS
+        raw = DS.prefetch_universe(symbols, fetch_from, end_ms, log=log)
         log(f"Featurising {len(raw)} symbols...")
         for sym, df in raw.items():
             df = S.compute_features(df)
@@ -453,7 +457,7 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
     report.avg_exposure = exposure_sum / max(1, len(timeline))
 
     # BTC buy & hold over the same window, for reference
-    btc = per_symbol.get("BTCUSDT")
+    btc = per_symbol.get("BTCUSDT") or per_symbol.get("BTC-USDT")
     if btc is not None:
         window = btc[(btc.index >= start_ms) & (btc.index <= end_ms)]
         if len(window) > 1:
@@ -496,9 +500,10 @@ def main(argv=None) -> int:
                    help="Capital level ($) at which volume sizing activates")
     p.add_argument("--vol-size-pct", type=float, default=0.001,
                    help="Fraction of a coin's daily volume per trade (0.001 = 0.1%%)")
-    p.add_argument("--source", choices=["api", "archive"], default="api",
-                   help="'api' = live-listed symbols (survivorship-biased); "
-                        "'archive' = point-in-time universe incl. delisted coins")
+    p.add_argument("--source", choices=["api", "archive", "okx"], default="api",
+                   help="'api' = Binance live-listed (survivorship-biased); "
+                        "'archive' = Binance point-in-time incl. delisted; "
+                        "'okx' = OKX spot (cross-exchange validation)")
     p.add_argument("--capital-cap", type=float, default=None,
                    help="Cap the capital used for sizing ($); profits still accrue "
                         "but the largest position is frozen at cap/8 (e.g. 1000000 -> $125k)")
@@ -515,6 +520,11 @@ def main(argv=None) -> int:
     elif args.source == "archive":
         from . import pit_universe as PIT
         symbols = PIT.list_all_usdt_symbols()
+        if args.max_symbols:
+            symbols = symbols[:args.max_symbols]
+    elif args.source == "okx":
+        from . import okx_source as OKX
+        symbols = OKX.list_usdt_symbols()
         if args.max_symbols:
             symbols = symbols[:args.max_symbols]
     else:
