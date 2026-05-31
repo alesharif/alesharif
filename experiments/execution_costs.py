@@ -24,18 +24,16 @@ def parse(d):
     return int(pd.Timestamp(d, tz="UTC").timestamp() * 1000)
 
 
-# (label, slippage_flat, slip_atr, slip_impact, fixed_notional)
-# fixed_notional=True sizes every trade at $250 (=2000*12.5%), so market
-# impact stays negligible -> isolates the edge at small, scalable size.
+# Correct sizing: position = 0.1% of the coin's daily volume, capped at
+# portfolio/8 which is itself capped at $1M/8 = $125k. This keeps every order
+# at ~0.6% of a 4h bar, so market impact is bounded and realistic.
+# (label, slippage_flat, slip_atr, slip_impact)
 SCENARIOS = [
-    ("compounding | fee only",        0.00, 0.00, 0.00, False),
-    ("compounding | mild costs",      0.05, 0.05, 0.05, False),
-    ("compounding | moderate",        0.05, 0.10, 0.10, False),
-    ("compounding | harsh",           0.10, 0.20, 0.20, False),
-    ("fixed $250  | fee only",        0.00, 0.00, 0.00, True),
-    ("fixed $250  | mild costs",      0.05, 0.05, 0.05, True),
-    ("fixed $250  | moderate",        0.05, 0.10, 0.10, True),
-    ("fixed $250  | harsh",           0.10, 0.20, 0.20, True),
+    ("fee only (0.2%)",            0.00, 0.00, 0.00),
+    ("+ spread 0.05%",             0.05, 0.00, 0.00),
+    ("mild  (atr .05, imp .05)",   0.05, 0.05, 0.05),
+    ("moderate (atr .10, imp .10)", 0.05, 0.10, 0.10),
+    ("harsh (atr .20, imp .20)",   0.10, 0.20, 0.20),
 ]
 
 
@@ -53,15 +51,16 @@ def main():
         per_symbol[sym] = d.set_index("close_time")
     print(f"Featurised {len(per_symbol)} symbols.\n")
 
-    base = dict(rank="vol", exit_model="pessimistic",
-                capital_cap=1_000_000.0, source="archive")
+    # CORRECT sizing per the user's rule: 0.1% of volume, capped at $1M/8.
+    base = dict(rank="vol", exit_model="pessimistic", source="archive",
+                vol_sizing=True, vol_threshold=30_000.0, vol_size_pct=0.001,
+                capital_cap=1_000_000.0)
 
     print(f"{'scenario':<30}{'return%':>16}{'trades':>9}{'win%':>8}{'PF':>7}{'maxDD%':>9}")
     print("-" * 79)
-    for label, slip, satr, simp, fixed in SCENARIOS:
+    for label, slip, satr, simp in SCENARIOS:
         rep = _run(per_symbol, start, end,
-                   dict(base, slippage=slip, slip_atr=satr, slip_impact=simp,
-                        fixed_notional=fixed))
+                   dict(base, slippage=slip, slip_atr=satr, slip_impact=simp))
         closed = rep.trades
         wins = sum(1 for t in closed if t.net_pct > 0)
         gw = sum(t.net_pct for t in closed if t.net_pct > 0)
