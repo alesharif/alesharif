@@ -29,14 +29,54 @@ import requests
 
 from . import paper_bot_strategy as S
 
-# S3 REST endpoint (XML listing); the CloudFront host serves an HTML index at /
-S3_LIST = "https://s3.ap-northeast-1.amazonaws.com/data.binance.vision/"
+# S3 REST endpoints that serve the XML bucket listing. We try them in order;
+# some AWS edge nodes intermittently present a "certificate not yet valid"
+# cert (a clock/rotation quirk), so we retry and, as a last resort for this
+# PUBLIC archive listing only, fall back to an unverified TLS handshake. Actual
+# candle ZIPs are always downloaded from the verified CloudFront host below.
+S3_HOSTS = [
+    "https://s3.ap-northeast-1.amazonaws.com/data.binance.vision/",
+    "https://s3.amazonaws.com/data.binance.vision/",
+    "https://data.binance.vision.s3.amazonaws.com/",
+]
 ARCHIVE = "https://data.binance.vision/"
 CACHE_DIR = os.environ.get("BINANCE_SIM_CACHE", "data/cache")
 ARCHIVE_DIR = os.path.join(CACHE_DIR, "archive")
 
 _SESSION = requests.Session()
 _SESSION.headers.update({"User-Agent": "binance-sim/0.1"})
+
+# silence the single warning emitted when we fall back to verify=False
+try:
+    requests.packages.urllib3.disable_warnings()  # type: ignore[attr-defined]
+except Exception:  # noqa: BLE001
+    pass
+
+
+def _get(url: str, params: dict, timeout: int = 30, tries: int = 4):
+    """GET with verified TLS first; fall back to unverified on cert errors."""
+    last = None
+    for attempt in range(tries):
+        for verify in (True, False):
+            try:
+                return _SESSION.get(url, params=params, timeout=timeout, verify=verify)
+            except requests.exceptions.SSLError as exc:
+                last = exc  # try unverified next, then retry
+            except requests.RequestException as exc:
+                last = exc
+                break  # non-TLS error: retry the request fresh
+    raise RuntimeError(f"GET {url} failed after {tries} tries: {last}")
+
+
+def _get_listing(params: dict):
+    """Fetch an S3 XML listing, trying each mirror host until one responds."""
+    last = None
+    for host in S3_HOSTS:
+        try:
+            return _get(host, params).text
+        except Exception as exc:  # noqa: BLE001
+            last = exc
+    raise RuntimeError(f"All S3 listing hosts failed: {last}")
 
 
 def _list_prefix(prefix: str) -> List[str]:
@@ -47,13 +87,12 @@ def _list_prefix(prefix: str) -> List[str]:
         params = {"delimiter": "/", "prefix": prefix}
         if marker:
             params["marker"] = marker
-        r = _SESSION.get(S3_LIST, params=params, timeout=30)
-        r.raise_for_status()
-        names = re.findall(rf"<Prefix>{re.escape(prefix)}([^/]+)/</Prefix>", r.text)
+        text = _get_listing(params)
+        names = re.findall(rf"<Prefix>{re.escape(prefix)}([^/]+)/</Prefix>", text)
         out.extend(names)
-        if "<IsTruncated>true</IsTruncated>" not in r.text:
+        if "<IsTruncated>true</IsTruncated>" not in text:
             break
-        nm = re.search(r"<NextMarker>([^<]+)</NextMarker>", r.text)
+        nm = re.search(r"<NextMarker>([^<]+)</NextMarker>", text)
         if not nm:
             break
         marker = nm.group(1)
@@ -83,15 +122,14 @@ def list_symbol_months(symbol: str, interval: str = "4h") -> List[str]:
         params = {"prefix": prefix}
         if marker:
             params["marker"] = marker
-        r = _SESSION.get(S3_LIST, params=params, timeout=30)
-        r.raise_for_status()
+        text = _get_listing(params)
         keys = re.findall(
             rf"<Key>{re.escape(prefix)}{re.escape(symbol)}-{interval}-(\d{{4}}-\d{{2}})\.zip</Key>",
-            r.text)
+            text)
         months.extend(keys)
-        if "<IsTruncated>true</IsTruncated>" not in r.text:
+        if "<IsTruncated>true</IsTruncated>" not in text:
             break
-        nm = re.search(r"<NextMarker>([^<]+)</NextMarker>", r.text)
+        nm = re.search(r"<NextMarker>([^<]+)</NextMarker>", text)
         if not nm:
             break
         marker = nm.group(1)
@@ -112,7 +150,7 @@ def _download_month(symbol: str, ym: str, interval: str = "4h") -> Optional[pd.D
             pass
     url = f"{ARCHIVE}data/spot/monthly/klines/{symbol}/{interval}/{symbol}-{interval}-{ym}.zip"
     try:
-        r = _SESSION.get(url, timeout=60)
+        r = _get(url, {}, timeout=60)
         if r.status_code != 200 or not r.content[:2] == b"PK":
             return None
         z = zipfile.ZipFile(io.BytesIO(r.content))
