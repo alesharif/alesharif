@@ -263,6 +263,7 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
         capital_cap: Optional[float] = None,
         slip_atr: float = 0.0, slip_impact: float = 0.0,
         est_spread: bool = False, spread_filter_ratio: float = 0.0,
+        near_high_min: float = 0.0, max_signal_age: int = 0,
         log=print) -> BacktestReport:
     """Replay the strategy over history.
 
@@ -437,6 +438,14 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
                     continue
                 row = df.loc[t]
                 if bool(row["entry_signal"]):
+                    # freshness filters (anti top-buying / anti falling-knife)
+                    if near_high_min > 0:
+                        hn = float(row.get("high_n", 0.0) or 0.0)
+                        if hn > 0 and float(row["close"]) / hn < near_high_min:
+                            continue
+                    if max_signal_age > 0:
+                        if float(row.get("signal_age", 1) or 1) > max_signal_age:
+                            continue
                     spread = float(row.get("cs_spread", 0.0) or 0.0)
                     # spread-aware filter: skip when the estimated spread is
                     # large relative to the volatility target (target ~ 1 ATR).
@@ -545,6 +554,12 @@ def main(argv=None) -> int:
                    help="Capital level ($) at which volume sizing activates")
     p.add_argument("--vol-size-pct", type=float, default=0.001,
                    help="Fraction of a coin's daily volume per trade (0.001 = 0.1%%)")
+    p.add_argument("--near-high-min", type=float, default=0.0,
+                   help="Freshness: skip entry if close < this * recent swing high "
+                        "(e.g. 0.92 = don't buy >8%% below the high)")
+    p.add_argument("--max-signal-age", type=int, default=0,
+                   help="Freshness: skip entry if the signal has been True for more "
+                        "than N bars (e.g. 3 = only fresh signals)")
     p.add_argument("--source", choices=["api", "archive", "okx"], default="api",
                    help="'api' = Binance live-listed (survivorship-biased); "
                         "'archive' = Binance point-in-time incl. delisted; "
@@ -594,7 +609,8 @@ def main(argv=None) -> int:
                  vol_threshold=args.vol_threshold, vol_size_pct=args.vol_size_pct,
                  source=args.source, capital_cap=args.capital_cap,
                  slip_atr=args.slip_atr, slip_impact=args.slip_impact,
-                 est_spread=args.est_spread, spread_filter_ratio=args.spread_filter)
+                 est_spread=args.est_spread, spread_filter_ratio=args.spread_filter,
+                 near_high_min=args.near_high_min, max_signal_age=args.max_signal_age)
     print("\n" + report.summary())
 
     if args.out:

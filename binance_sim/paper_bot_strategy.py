@@ -48,6 +48,7 @@ ADX_MIN = 25.0
 STABLE_RATIO_MAX = 1.3
 ATR_PERIOD = 14
 MIN_HISTORY = 210            # need 200 for EMA200
+FRESH_HIGH_WINDOW = 8        # bars for recent swing high (freshness filter)
 
 # Exit
 SL_ATR = 1.5
@@ -173,6 +174,8 @@ def compute_features(df: pd.DataFrame) -> pd.DataFrame:
     df["adx"] = compute_adx(h, l, c, 14)
     df["vol_pit"] = pd.Series(df["quote_av"].to_numpy(float)).rolling(VOL_BARS).mean().shift(1).to_numpy() * 6
     df["cs_spread"] = corwin_schultz_spread(h, l, window=20)
+    # freshness inputs: recent swing high (anti "falling knife" entries)
+    df["high_n"] = pd.Series(h).rolling(FRESH_HIGH_WINDOW).max().to_numpy()
     return df
 
 
@@ -257,4 +260,11 @@ def attach_entry_signal(df: pd.DataFrame) -> pd.DataFrame:
     else:
         sig[:] = False
     df["entry_signal"] = sig
+    # signal_age = how many consecutive bars the signal has been True (1 = fresh)
+    age = np.zeros(len(sig), dtype=int)
+    run = 0
+    for i in range(len(sig)):
+        run = run + 1 if sig[i] else 0
+        age[i] = run
+    df["signal_age"] = age
     return df
