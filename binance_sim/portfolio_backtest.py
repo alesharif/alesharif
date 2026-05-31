@@ -152,6 +152,7 @@ class Position:
     peak: float
     sl_price: float
     entry_qv: float = 0.0       # quote volume of the entry bar (for impact cost)
+    entry_spread: float = 0.0   # estimated spread (fraction) at entry bar
     trailing_on: bool = False
     bars_held: int = 0
 
@@ -261,6 +262,7 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
         vol_size_pct: float = 0.001, source: str = "api",
         capital_cap: Optional[float] = None,
         slip_atr: float = 0.0, slip_impact: float = 0.0,
+        est_spread: bool = False, spread_filter_ratio: float = 0.0,
         log=print) -> BacktestReport:
     """Replay the strategy over history.
 
@@ -291,11 +293,14 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
         return slip_impact * math.sqrt(participation) * 100.0
 
     def _net_pct(entry: float, exit: float, pos_usd: float, atr: float,
-                 entry_qv: float, exit_qv: float, is_stop: bool) -> float:
+                 entry_qv: float, exit_qv: float, is_stop: bool,
+                 spread_frac: float = 0.0) -> float:
         """Realistic net return (%) after fees, spread, market impact and
         (on stop fills) volatility slippage."""
         net = (exit / entry - 1) * 100 - cost_rt
         net -= _impact(pos_usd, entry_qv) + _impact(pos_usd, exit_qv)
+        if est_spread and spread_frac > 0:
+            net -= spread_frac * 100.0               # per-coin round-trip spread cost
         if is_stop and slip_atr > 0 and exit > 0:
             net -= slip_atr * (atr / exit) * 100.0   # adverse fill beyond the stop
         return net
@@ -365,7 +370,7 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
                     last_px = float(last_row["close"])
                     net = _net_pct(pos.entry_price, last_px, pos.pos_usd, pos.entry_atr,
                                    pos.entry_qv, float(last_row.get("quote_av", 0.0)),
-                                   is_stop=False)
+                                   is_stop=False, spread_frac=pos.entry_spread)
                     pnl = pos.pos_usd * net / 100.0
                     capital += pnl
                     report.trades.append(ClosedTrade(
@@ -412,7 +417,8 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
             if exit_price is not None:
                 is_stop = outcome in ("SL", "TRAIL")
                 net = _net_pct(pos.entry_price, exit_price, pos.pos_usd, atr,
-                               pos.entry_qv, float(row["quote_av"]), is_stop=is_stop)
+                               pos.entry_qv, float(row["quote_av"]), is_stop=is_stop,
+                               spread_frac=pos.entry_spread)
                 pnl = pos.pos_usd * net / 100.0
                 capital += pnl
                 report.trades.append(ClosedTrade(
@@ -431,14 +437,21 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
                     continue
                 row = df.loc[t]
                 if bool(row["entry_signal"]):
+                    spread = float(row.get("cs_spread", 0.0) or 0.0)
+                    # spread-aware filter: skip when the estimated spread is
+                    # large relative to the volatility target (target ~ 1 ATR).
+                    if spread_filter_ratio > 0:
+                        target_frac = float(row["atr"]) / float(row["close"])
+                        if target_frac <= 0 or spread > spread_filter_ratio * target_frac:
+                            continue
                     cands.append((sym, float(row["close"]), float(row["atr"]),
-                                  float(row["vol_pit"]), float(row["quote_av"])))
+                                  float(row["vol_pit"]), float(row["quote_av"]), spread))
             if rank == "vol":
                 cands.sort(key=lambda x: x[3], reverse=True)
             else:
                 cands.sort(key=lambda x: x[0])
             slots = S.MAX_CONCURRENT - len(positions)
-            for sym, price, atr, _vol, _qv in cands[:slots]:
+            for sym, price, atr, _vol, _qv, _spread in cands[:slots]:
                 # cap the capital used for sizing (profits still accumulate,
                 # but the largest position is frozen at capital_cap/8)
                 sizing_cap = capital if capital_cap is None else min(capital, capital_cap)
@@ -451,7 +464,7 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
                 positions[sym] = Position(
                     symbol=sym, entry_time=int(t), entry_price=price, entry_atr=atr,
                     pos_usd=pos_usd, peak=price, sl_price=price - S.SL_ATR * atr,
-                    entry_qv=_qv)
+                    entry_qv=_qv, entry_spread=_spread)
 
         # --- mark-to-market equity ---------------------------------
         mtm = capital
@@ -474,7 +487,8 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
             last_row = df.loc[last_t]
             px = float(last_row["close"])
             net = _net_pct(pos.entry_price, px, pos.pos_usd, pos.entry_atr,
-                           pos.entry_qv, float(last_row["quote_av"]), is_stop=False)
+                           pos.entry_qv, float(last_row["quote_av"]), is_stop=False,
+                           spread_frac=pos.entry_spread)
             pnl = pos.pos_usd * net / 100.0
             capital += pnl
             report.trades.append(ClosedTrade(
@@ -544,6 +558,12 @@ def main(argv=None) -> int:
     p.add_argument("--slip-impact", type=float, default=0.0,
                    help="Market-impact coefficient; cost/side = coef*sqrt(pos/bar_volume) "
                         "(e.g. 0.10)")
+    p.add_argument("--est-spread", action="store_true",
+                   help="Charge a per-coin round-trip spread cost estimated from "
+                        "high/low (Corwin-Schultz)")
+    p.add_argument("--spread-filter", type=float, default=0.0,
+                   help="Skip entries where est. spread > ratio * (ATR/price). "
+                        "e.g. 0.10 = spread must be <=10%% of the 1-ATR target")
     p.add_argument("--out", default=None, help="Directory to write trades.csv / equity.csv")
     args = p.parse_args(argv)
 
@@ -573,7 +593,8 @@ def main(argv=None) -> int:
                  exit_model=args.exit_model, vol_sizing=args.vol_sizing,
                  vol_threshold=args.vol_threshold, vol_size_pct=args.vol_size_pct,
                  source=args.source, capital_cap=args.capital_cap,
-                 slip_atr=args.slip_atr, slip_impact=args.slip_impact)
+                 slip_atr=args.slip_atr, slip_impact=args.slip_impact,
+                 est_spread=args.est_spread, spread_filter_ratio=args.spread_filter)
     print("\n" + report.summary())
 
     if args.out:

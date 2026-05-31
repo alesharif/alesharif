@@ -172,7 +172,35 @@ def compute_features(df: pd.DataFrame) -> pd.DataFrame:
     df["macd_pos"] = (macd > 0).astype(float)
     df["adx"] = compute_adx(h, l, c, 14)
     df["vol_pit"] = pd.Series(df["quote_av"].to_numpy(float)).rolling(VOL_BARS).mean().shift(1).to_numpy() * 6
+    df["cs_spread"] = corwin_schultz_spread(h, l, window=20)
     return df
+
+
+def corwin_schultz_spread(high, low, window: int = 20):
+    """Corwin & Schultz (2012) bid-ask spread estimate from high/low prices.
+
+    Returns the estimated spread as a *fraction* of price, smoothed with a
+    causal rolling mean. Lets us approximate per-coin spread historically
+    (real spread is absent from kline data). Zero look-ahead.
+    """
+    h = np.asarray(high, dtype=float)
+    l = np.asarray(low, dtype=float)
+    n = len(h)
+    out = np.full(n, np.nan)
+    if n < 2:
+        return out
+    with np.errstate(divide="ignore", invalid="ignore"):
+        hl = np.log(h / l) ** 2                       # single-bar squared log range
+        h2 = np.maximum(h[1:], h[:-1])               # 2-bar high
+        l2 = np.minimum(l[1:], l[:-1])               # 2-bar low
+        beta = hl[1:] + hl[:-1]
+        gamma = np.log(h2 / l2) ** 2
+        k = 3.0 - 2.0 * np.sqrt(2.0)
+        alpha = (np.sqrt(2.0 * beta) - np.sqrt(beta)) / k - np.sqrt(gamma / k)
+        s = 2.0 * (np.exp(alpha) - 1.0) / (1.0 + np.exp(alpha))
+    s = np.where(np.isfinite(s) & (s > 0), s, 0.0)   # CS convention: clamp negatives
+    out[1:] = s
+    return pd.Series(out).rolling(window, min_periods=max(2, window // 4)).mean().to_numpy()
 
 
 def entry_ok_at(df: pd.DataFrame, T: int):
