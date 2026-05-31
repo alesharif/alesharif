@@ -343,7 +343,9 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
     # BTC market-regime map (close_time -> is BTC in a higher-TF uptrend?)
     btc_up: Dict[int, float] = {}
     if btc_regime:
-        btc_df = per_symbol.get("BTCUSDT") or per_symbol.get("BTC-USDT")
+        btc_df = per_symbol.get("BTCUSDT")
+        if btc_df is None:
+            btc_df = per_symbol.get("BTC-USDT")
         if btc_df is not None and "htf_uptrend" in btc_df.columns:
             btc_up = {int(t): float(v) for t, v in btc_df["htf_uptrend"].items()}
 
