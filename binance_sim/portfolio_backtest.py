@@ -264,6 +264,7 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
         slip_atr: float = 0.0, slip_impact: float = 0.0,
         est_spread: bool = False, spread_filter_ratio: float = 0.0,
         near_high_min: float = 0.0, max_signal_age: int = 0,
+        htf_trend: bool = False, btc_regime: bool = False,
         log=print) -> BacktestReport:
     """Replay the strategy over history.
 
@@ -338,6 +339,13 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
 
     # last candle time per symbol — used to force-close on delisting
     last_seen: Dict[str, int] = {s: int(df.index.max()) for s, df in per_symbol.items()}
+
+    # BTC market-regime map (close_time -> is BTC in a higher-TF uptrend?)
+    btc_up: Dict[int, float] = {}
+    if btc_regime:
+        btc_df = per_symbol.get("BTCUSDT") or per_symbol.get("BTC-USDT")
+        if btc_df is not None and "htf_uptrend" in btc_df.columns:
+            btc_up = {int(t): float(v) for t, v in btc_df["htf_uptrend"].items()}
 
     # 2) master 4h timeline within [start, end] ----------------------
     times = set()
@@ -431,13 +439,18 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
         # --- ENTRY pass --------------------------------------------
         sr = stable_ratio.get(t, float("nan"))
         stable_block = np.isfinite(sr) and sr > S.STABLE_RATIO_MAX
-        if not stable_block and len(positions) < S.MAX_CONCURRENT:
+        # BTC market-regime gate: skip all new entries when BTC trend is down
+        regime_block = btc_regime and btc_up.get(t, 1.0) < 0.5
+        if not stable_block and not regime_block and len(positions) < S.MAX_CONCURRENT:
             cands = []
             for sym, df in per_symbol.items():
                 if sym in positions or t not in df.index:
                     continue
                 row = df.loc[t]
                 if bool(row["entry_signal"]):
+                    # higher-timeframe trend filter (per coin, ~daily EMA50)
+                    if htf_trend and float(row.get("htf_uptrend", 1.0) or 0.0) < 0.5:
+                        continue
                     # freshness filters (anti top-buying / anti falling-knife)
                     if near_high_min > 0:
                         hn = float(row.get("high_n", 0.0) or 0.0)
@@ -560,6 +573,10 @@ def main(argv=None) -> int:
     p.add_argument("--max-signal-age", type=int, default=0,
                    help="Freshness: skip entry if the signal has been True for more "
                         "than N bars (e.g. 3 = only fresh signals)")
+    p.add_argument("--htf-trend", action="store_true",
+                   help="Require the coin to be above its higher-TF (~daily-50) trend")
+    p.add_argument("--btc-regime", action="store_true",
+                   help="Skip all entries when BTC's higher-TF trend is down (market regime)")
     p.add_argument("--source", choices=["api", "archive", "okx"], default="api",
                    help="'api' = Binance live-listed (survivorship-biased); "
                         "'archive' = Binance point-in-time incl. delisted; "
@@ -610,7 +627,8 @@ def main(argv=None) -> int:
                  source=args.source, capital_cap=args.capital_cap,
                  slip_atr=args.slip_atr, slip_impact=args.slip_impact,
                  est_spread=args.est_spread, spread_filter_ratio=args.spread_filter,
-                 near_high_min=args.near_high_min, max_signal_age=args.max_signal_age)
+                 near_high_min=args.near_high_min, max_signal_age=args.max_signal_age,
+                 htf_trend=args.htf_trend, btc_regime=args.btc_regime)
     print("\n" + report.summary())
 
     if args.out:

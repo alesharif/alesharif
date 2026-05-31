@@ -49,6 +49,7 @@ STABLE_RATIO_MAX = 1.3
 ATR_PERIOD = 14
 MIN_HISTORY = 210            # need 200 for EMA200
 FRESH_HIGH_WINDOW = 8        # bars for recent swing high (freshness filter)
+HTF_EMA = 300               # 4h bars ~= daily EMA50 (higher-timeframe trend)
 
 # Exit
 SL_ATR = 1.5
@@ -176,6 +177,9 @@ def compute_features(df: pd.DataFrame) -> pd.DataFrame:
     df["cs_spread"] = corwin_schultz_spread(h, l, window=20)
     # freshness inputs: recent swing high (anti "falling knife" entries)
     df["high_n"] = pd.Series(h).rolling(FRESH_HIGH_WINDOW).max().to_numpy()
+    # higher-timeframe trend proxy: price above its ~daily-50 EMA (EMA300 on 4h)
+    htf = ema_series(c, HTF_EMA)
+    df["htf_uptrend"] = (c > htf).astype(float)
     return df
 
 
