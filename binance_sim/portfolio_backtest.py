@@ -265,6 +265,7 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
         est_spread: bool = False, spread_filter_ratio: float = 0.0,
         near_high_min: float = 0.0, max_signal_age: int = 0,
         htf_trend: bool = False, btc_regime: bool = False,
+        daily_filter_col: str = "",
         log=print) -> BacktestReport:
     """Replay the strategy over history.
 
@@ -453,6 +454,9 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
                     # higher-timeframe trend filter (per coin, ~daily EMA50)
                     if htf_trend and float(row.get("htf_uptrend", 1.0) or 0.0) < 0.5:
                         continue
+                    # generic daily-timeframe filter column (see daily_filters.py)
+                    if daily_filter_col and float(row.get(daily_filter_col, 1.0) or 0.0) < 0.5:
+                        continue
                     # freshness filters (anti top-buying / anti falling-knife)
                     if near_high_min > 0:
                         hn = float(row.get("high_n", 0.0) or 0.0)
@@ -579,6 +583,9 @@ def main(argv=None) -> int:
                    help="Require the coin to be above its higher-TF (~daily-50) trend")
     p.add_argument("--btc-regime", action="store_true",
                    help="Skip all entries when BTC's higher-TF trend is down (market regime)")
+    p.add_argument("--daily-filter", default="",
+                   help="Require a daily-filter column (see daily_filters.CANDIDATES), "
+                        "e.g. d_above_ema50, d_ema20_50, d_macd_up, d_stoch_up")
     p.add_argument("--source", choices=["api", "archive", "okx"], default="api",
                    help="'api' = Binance live-listed (survivorship-biased); "
                         "'archive' = Binance point-in-time incl. delisted; "
@@ -630,7 +637,8 @@ def main(argv=None) -> int:
                  slip_atr=args.slip_atr, slip_impact=args.slip_impact,
                  est_spread=args.est_spread, spread_filter_ratio=args.spread_filter,
                  near_high_min=args.near_high_min, max_signal_age=args.max_signal_age,
-                 htf_trend=args.htf_trend, btc_regime=args.btc_regime)
+                 htf_trend=args.htf_trend, btc_regime=args.btc_regime,
+                 daily_filter_col=args.daily_filter)
     print("\n" + report.summary())
 
     if args.out:
