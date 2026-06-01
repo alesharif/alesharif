@@ -164,43 +164,54 @@ def load(s_str, e_str):
 
 
 def main():
+    import gc
+    import json
+    import os
     months = {
         "2025-04": ("2025-04-01", "2025-05-01"),
         "2025-12": ("2025-12-01", "2026-01-01"),
         "2026-04": ("2026-04-01", "2026-05-01"),
         "2026-05": ("2026-05-01", "2026-06-01"),
     }
-    pre = {}
-    for name, (s, e) in months.items():
-        print(f"Precomputing {name} (hybrid exits once) ...", flush=True)
-        ps, times, end = load(s, e)
-        sigs = precompute(ps, times, end)
-        # keep only the light fields needed later; drop heavy frames
-        pre[name] = (sigs, times)
-        print(f"  {name}: {len(sigs)} signals", flush=True)
-        # free per-month memory: 1s cache + featurised frames
-        _SEC.clear()
-        del ps
-        import gc
-        gc.collect()
-    print()
-
     caps = [0.08, 0.09, 0.10, 0.12, 0.15]
-    print("FAST ATR cap sweep, FOUR months (hybrid TRAIL 1.5)")
-    print(f"{'cap':<7}{'month':<9}{'trades':>8}{'WR':>7}{'PF':>7}{'worst':>9}{'return':>9}")
-    print("-" * 56)
-    for cap in caps:
-        agg = []
-        for name in months:
-            signals, times = pre[name]
-            nets = simulate_cap(signals, times, cap)
-            agg += nets
+    os.makedirs("results_atr_cap", exist_ok=True)
+
+    hdr = f"{'cap':<7}{'month':<9}{'trades':>8}{'WR':>7}{'PF':>7}{'worst':>9}{'return':>9}"
+    print("FAST ATR cap sweep — per-month results as each finishes (hybrid TRAIL 1.5)\n")
+    all_rows = {}   # cap -> list of nets across months (for the final ALL)
+
+    for name, (s, e) in months.items():
+        # resume: skip months already saved to disk
+        cache_file = f"results_atr_cap/{name}.json"
+        if os.path.exists(cache_file):
+            print(f"[{name}] already done (cached), loading ...", flush=True)
+            saved = json.load(open(cache_file))
+            sigs, times = saved["signals"], saved["times"]
+        else:
+            print(f"Precomputing {name} (hybrid exits once) ...", flush=True)
+            ps, times, end = load(s, e)
+            sigs = precompute(ps, times, end)
+            _SEC.clear(); del ps; gc.collect()
+            json.dump({"signals": sigs, "times": times}, open(cache_file, "w"))
+            print(f"  {name}: {len(sigs)} signals -> saved", flush=True)
+
+        # compute + PRINT this month's results for all caps immediately
+        print(f"\n=== RESULTS: {name} ===")
+        print(hdr); print("-" * 56)
+        for cap in caps:
+            nets = simulate_cap(sigs, times, cap)
+            all_rows.setdefault(cap, []).extend(nets)
             n, wr, pf, worst, ret = stats(nets)
             print(f"{cap*100:.0f}%{'':<4}{name:<9}{n:>8}{wr:>6.0f}%{pf:>7.2f}{worst:>8.1f}%{ret:>8.2f}%")
-        n, wr, pf, worst, ret = stats(agg)
+        print("-" * 56 + "\n", flush=True)
+
+    # final aggregate across all months
+    print("\n=== RESULTS: ALL FOUR MONTHS AGGREGATE ===")
+    print(hdr); print("-" * 56)
+    for cap in caps:
+        n, wr, pf, worst, ret = stats(all_rows[cap])
         print(f"{cap*100:.0f}%{'':<4}{'ALL':<9}{n:>8}{wr:>6.0f}%{pf:>7.2f}{worst:>8.1f}%{ret:>8.2f}%")
-        print("-" * 56)
-        sys.stdout.flush()
+    print("-" * 56, flush=True)
 
 
 if __name__ == "__main__":
