@@ -83,7 +83,10 @@ def hybrid_exit(symbol, et, ep, atr, end):
 
 
 def precompute(ps, times, end):
-    """Compute hybrid exit ONCE for every entry signal. Returns list of dicts."""
+    """Compute hybrid exit ONCE for every entry signal. Returns list of dicts.
+
+    Frees the 1s cache periodically so memory stays bounded on busy months.
+    """
     signals = []
     seen = set()   # (symbol, entry_time) dedup
     for t in times:
@@ -100,14 +103,19 @@ def precompute(ps, times, end):
             price = float(row["close"]); atr = float(row["atr"])
             ar = atr / price; vol = float(row["vol_pit"])
             signals.append(dict(sym=sym, t=t, price=price, atr=atr, ar=ar, vol=vol))
-    # compute exits (heavy) once
-    for s in signals:
+    # compute exits (heavy) once; flush the 1s cache every N to bound memory
+    import gc
+    for i, s in enumerate(signals):
         xt, xp, oc = hybrid_exit(s["sym"], s["t"], s["price"], s["atr"], end)
         if oc == "OPEN":
             s["exit_t"] = None; s["net"] = None
         else:
             s["exit_t"] = xt
             s["net"] = (xp / s["price"] - 1) * 100 - FEE
+        if (i + 1) % 200 == 0:
+            _SEC.clear()
+            gc.collect()
+            print(f"    ...{i+1}/{len(signals)} exits (mem flushed)", flush=True)
     return signals
 
 
