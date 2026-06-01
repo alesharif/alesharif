@@ -180,6 +180,8 @@ def compute_features(df: pd.DataFrame) -> pd.DataFrame:
     # higher-timeframe trend proxy: price above its ~daily-50 EMA (EMA300 on 4h)
     htf = ema_series(c, HTF_EMA)
     df["htf_uptrend"] = (c > htf).astype(float)
+    # volatility ratio: ATR as a fraction of price (filter extreme-volatility coins)
+    df["atr_ratio"] = df["atr"].to_numpy() / np.where(c > 0, c, np.nan)
     return df
 
 

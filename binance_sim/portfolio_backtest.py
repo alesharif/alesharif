@@ -265,7 +265,7 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
         est_spread: bool = False, spread_filter_ratio: float = 0.0,
         near_high_min: float = 0.0, max_signal_age: int = 0,
         htf_trend: bool = False, btc_regime: bool = False,
-        daily_filter_col: str = "",
+        daily_filter_col: str = "", max_atr_ratio: float = 0.0,
         log=print) -> BacktestReport:
     """Replay the strategy over history.
 
@@ -451,6 +451,11 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
                     continue
                 row = df.loc[t]
                 if bool(row["entry_signal"]):
+                    # volatility filter: skip coins whose ATR is too large vs price
+                    if max_atr_ratio > 0:
+                        ar = float(row.get("atr_ratio", 0.0) or 0.0)
+                        if ar > max_atr_ratio:
+                            continue
                     # higher-timeframe trend filter (per coin, ~daily EMA50)
                     if htf_trend and float(row.get("htf_uptrend", 1.0) or 0.0) < 0.5:
                         continue
@@ -586,6 +591,9 @@ def main(argv=None) -> int:
     p.add_argument("--daily-filter", default="",
                    help="Require a daily-filter column (see daily_filters.CANDIDATES), "
                         "e.g. d_above_ema50, d_ema20_50, d_macd_up, d_stoch_up")
+    p.add_argument("--max-atr-ratio", type=float, default=0.0,
+                   help="Skip entries where ATR/price exceeds this (e.g. 0.10 = 10%%); "
+                        "blocks extreme-volatility / collapsing coins")
     p.add_argument("--source", choices=["api", "archive", "okx"], default="api",
                    help="'api' = Binance live-listed (survivorship-biased); "
                         "'archive' = Binance point-in-time incl. delisted; "
@@ -638,7 +646,7 @@ def main(argv=None) -> int:
                  est_spread=args.est_spread, spread_filter_ratio=args.spread_filter,
                  near_high_min=args.near_high_min, max_signal_age=args.max_signal_age,
                  htf_trend=args.htf_trend, btc_regime=args.btc_regime,
-                 daily_filter_col=args.daily_filter)
+                 daily_filter_col=args.daily_filter, max_atr_ratio=args.max_atr_ratio)
     print("\n" + report.summary())
 
     if args.out:
