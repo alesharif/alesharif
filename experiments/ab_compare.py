@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""A vs B: original vs +golden-trend filter. Full period, all coins, fees only.
+"""A vs B: original vs +EMA100>200-trend filter. Full period, all coins, fees only.
 
 A = ORIGINAL : SL1.5/TRAIL0.2, vol-sizing 0.1% capped $125k, fees only (no slip)
 B = + golden : same, plus daily EMA50>EMA200 trend filter
@@ -95,8 +95,12 @@ def summary(rep):
     gw, gl = sum(wins), -sum(losses)
     pf = (gw / gl) if gl > 0 else float("inf")
     wr = (len(wins) / len(c) * 100) if c else 0.0
+    avg_w = (sum(wins) / len(wins)) if wins else 0.0
+    avg_l = (sum(losses) / len(losses)) if losses else 0.0   # negative
+    pp = (avg_w / -avg_l) if avg_l < 0 else float("inf")     # payoff = avgWin/avgLoss
     worst = min((t.net_pct for t in c), default=0.0)
     return dict(trades=len(c), win_rate=round(wr, 1), pf=round(pf, 2),
+                pp=round(pp, 2), avg_win=round(avg_w, 2), avg_loss=round(avg_l, 2),
                 worst=round(worst, 1), maxdd=round(rep.max_drawdown * 100, 1),
                 total_return=round(rep.total_return * 100, 1))
 
@@ -112,8 +116,8 @@ def main():
 
     S.SL_ATR, S.TRAIL_ATR, S.ACTIVATE_ATR = 1.5, 0.2, 0.2   # ORIGINAL geometry
 
-    repA = run_variant(per_symbol, start, end, dict())                              # original
-    repB = run_variant(per_symbol, start, end, dict(daily_filter_col="d_ema50_200"))  # +golden
+    repA = run_variant(per_symbol, start, end, dict())                               # original
+    repB = run_variant(per_symbol, start, end, dict(daily_filter_col="d_ema100_200"))  # +EMA100>200
 
     mA, mB = monthly_table(repA), monthly_table(repB)
     sA, sB = summary(repA), summary(repB)
@@ -128,7 +132,7 @@ def main():
         json.dump(data, f, indent=2, default=str)
 
     # ---- print monthly table ----
-    print("MONTHLY  (A=original, B=+golden)   ret% | winrate%")
+    print("MONTHLY  (A=original, B=+EMA100>200)   ret% | winrate%")
     print(f"{'month':<10}{'A ret':>8}{'A WR':>7}{'B ret':>8}{'B WR':>7}")
     print("-" * 40)
     for k in sorted(set(mA) | set(mB)):
@@ -137,9 +141,10 @@ def main():
         print(f"{k:<10}{ra:>7.1f}%{(wa if wa is not None else 0):>6.0f}%"
               f"{rb:>7.1f}%{(wb_ if wb_ is not None else 0):>6.0f}%")
 
-    print("\nSUMMARY        A(original)     B(+golden)")
-    for key in ["total_return", "win_rate", "pf", "worst", "maxdd", "trades"]:
-        print(f"  {key:<14}{str(sA[key]):>12}{str(sB[key]):>14}")
+    print("\nSUMMARY        A(original)     B(+EMA100>200)")
+    for key in ["total_return", "win_rate", "pf", "pp", "avg_win", "avg_loss",
+                "worst", "maxdd", "trades"]:
+        print(f"  {key:<14}{str(sA[key]):>12}{str(sB[key]):>16}")
 
     def show_buckets(title, wb, lb, nw, nl, ntot):
         print(f"\n{title}  (total trades={ntot}, wins={nw}, losses={nl})")
@@ -153,7 +158,7 @@ def main():
             print(f"    {lab:<12}{cnt:>7}  {pct:>5.1f}%")
 
     show_buckets("BUCKETS A (original) - ALL YEARS", wbA, lbA, nwA, nlA, sA["trades"])
-    show_buckets("BUCKETS B (+golden)  - ALL YEARS", wbB, lbB, nwB, nlB, sB["trades"])
+    show_buckets("BUCKETS B (+EMA100>200)  - ALL YEARS", wbB, lbB, nwB, nlB, sB["trades"])
 
     # ---- 2025-only focus ----
     def only_2025(trades):
@@ -170,7 +175,7 @@ def main():
         print(f"{k:<10}{ra:>7.1f}%{(wa if wa is not None else 0):>6.0f}%"
               f"{rb:>7.1f}%{(wb_ if wb_ is not None else 0):>6.0f}%")
     show_buckets("BUCKETS A (original) - 2025", wbA25, lbA25, nwA25, nlA25, len(a25))
-    show_buckets("BUCKETS B (+golden)  - 2025", wbB25, lbB25, nwB25, nlB25, len(b25))
+    show_buckets("BUCKETS B (+EMA100>200)  - 2025", wbB25, lbB25, nwB25, nlB25, len(b25))
     data["b2025"] = dict(a_buckets=[wbA25, lbA25], b_buckets=[wbB25, lbB25],
                          a_n=len(a25), b_n=len(b25))
     with open(os.path.join(OUT, "ab_data.json"), "w") as f:
