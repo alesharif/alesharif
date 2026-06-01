@@ -166,8 +166,15 @@ def main():
     for name, (s, e) in months.items():
         print(f"Precomputing {name} (hybrid exits once) ...", flush=True)
         ps, times, end = load(s, e)
-        pre[name] = (precompute(ps, times, end), times)
-        print(f"  {name}: {len(pre[name][0])} signals", flush=True)
+        sigs = precompute(ps, times, end)
+        # keep only the light fields needed later; drop heavy frames
+        pre[name] = (sigs, times)
+        print(f"  {name}: {len(sigs)} signals", flush=True)
+        # free per-month memory: 1s cache + featurised frames
+        _SEC.clear()
+        del ps
+        import gc
+        gc.collect()
     print()
 
     caps = [0.08, 0.09, 0.10, 0.12, 0.15]
