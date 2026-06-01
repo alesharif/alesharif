@@ -266,6 +266,7 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
         near_high_min: float = 0.0, max_signal_age: int = 0,
         htf_trend: bool = False, btc_regime: bool = False,
         daily_filter_col: str = "", max_atr_ratio: float = 0.0,
+        min_atr_ratio: float = 0.0,
         log=print) -> BacktestReport:
     """Replay the strategy over history.
 
@@ -452,9 +453,11 @@ def run(symbols: List[str], start_ms: int, end_ms: int,
                 row = df.loc[t]
                 if bool(row["entry_signal"]):
                     # volatility filter: skip coins whose ATR is too large vs price
-                    if max_atr_ratio > 0:
+                    if max_atr_ratio > 0 or min_atr_ratio > 0:
                         ar = float(row.get("atr_ratio", 0.0) or 0.0)
-                        if ar > max_atr_ratio:
+                        if max_atr_ratio > 0 and ar > max_atr_ratio:
+                            continue
+                        if min_atr_ratio > 0 and ar < min_atr_ratio:
                             continue
                     # higher-timeframe trend filter (per coin, ~daily EMA50)
                     if htf_trend and float(row.get("htf_uptrend", 1.0) or 0.0) < 0.5:
