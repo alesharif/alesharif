@@ -118,7 +118,9 @@ def main():
         times = sorted({int(t) for df in ps.values() for t in df.index if start <= t <= end})
         sr = PB.build_stable_ratio(ff, end)
         sblock = {t: (np.isfinite(v) and v > S.STABLE_RATIO_MAX) for t, v in sr.items()}
-        btc = ps.get("BTCUSDT") or ps.get("BTC-USDT")
+        btc = ps.get("BTCUSDT")
+        if btc is None:
+            btc = ps.get("BTC-USDT")
         btc_up = {int(t): float(v) for t, v in btc["htf_uptrend"].items()} if btc is not None else {}
         open_until = {}
         for t in times:
