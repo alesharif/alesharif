@@ -1,0 +1,24 @@
+syntax OK
+committed
+branch 'claude/binance-strategy-simulation-6qd7y' set up to track 'origin/claude/binance-strategy-simulation-6qd7y'.
+=== running catcher X-ray (April + December) ===
+
+##### 2025-04: PUMP CENSUS & CATCHER COVERAGE #####
+total pump-bars: 2066  (REBOUND_T:280  BREAKOUT_T:250  SQUEEZE_T:1536)
+
+pump type     count  by BREAKOUT  by SQUEEZE  by REBOUND     ANY
+----------------------------------------------------------------
+BREAKOUT_T      250       50(20%)      37(14%)       0(0%)    24%
+SQUEEZE_T      1536       30(1%)       2(0%)       0(0%)     1%
+REBOUND_T       280        0(0%)       0(0%)       2(0%)     0%
+(each cell: pumps of that type caught by that catcher, and % of the type)
+
+##### 2025-12: PUMP CENSUS & CATCHER COVERAGE #####
+total pump-bars: 1356  (REBOUND_T:97  BREAKOUT_T:84  SQUEEZE_T:1175)
+
+pump type     count  by BREAKOUT  by SQUEEZE  by REBOUND     ANY
+----------------------------------------------------------------
+BREAKOUT_T       84       22(26%)      19(22%)       0(0%)    33%
+SQUEEZE_T      1175        9(0%)       4(0%)       0(0%)     0%
+REBOUND_T        97        0(0%)       0(0%)       1(1%)     1%
+(each cell: pumps of that type caught by that catcher, and % of the type)
