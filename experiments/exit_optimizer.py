@@ -56,10 +56,10 @@ def parse(d):
 # ---- exit configs: (sl_atr, [(tp_atr, frac), ...], runner_frac, trail_atr, activate_atr) ----
 CONFIGS = {
     "CUR":     dict(sl=1.5, tps=[], runner=1.0, trail=0.2, act=0.2),
-    "TRAIL_W": dict(sl=2.0, tps=[], runner=1.0, trail=1.0, act=0.5),
-    "SCALE_A": dict(sl=2.0, tps=[(1.0, 0.4), (2.5, 0.3)], runner=0.3, trail=1.0, act=0.0),
-    "SCALE_B": dict(sl=2.0, tps=[(1.5, 0.5)], runner=0.5, trail=1.0, act=0.0),
-    "TP_ONLY": dict(sl=2.0, tps=[(1.5, 1.0)], runner=0.0, trail=1.0, act=0.0),
+    "WIDE3.5": dict(sl=3.5, tps=[(1.0, 0.4), (3.0, 0.3)], runner=0.3, trail=1.5, act=1.0),
+    "WIDE5":   dict(sl=5.0, tps=[(1.0, 0.4), (3.0, 0.3)], runner=0.3, trail=1.5, act=1.0),
+    "NOSTOP":  dict(sl=99.0, tps=[(1.0, 0.4), (3.0, 0.3)], runner=0.3, trail=1.5, act=1.0),
+    "NOSTOP_T": dict(sl=99.0, tps=[], runner=1.0, trail=2.0, act=1.0),
 }
 
 
