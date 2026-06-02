@@ -55,16 +55,9 @@ def parse(d):
 
 # ---- exit configs: (sl_atr, [(tp_atr, frac), ...], runner_frac, trail_atr, activate_atr) ----
 EXIT = dict(sl=99.0, tps=[], runner=1.0, trail=2.0, act=1.0)   # NOSTOP_T (wide trail)
-REGIME_GATE = False                                            # BTC gate OFF (too blunt)
-# per-coin quality filters to test: (name, atr_ratio_min, adx_min)
-FILTERS = [
-    ("none",            0.00,  0),
-    ("atr>=3%",         0.03,  0),
-    ("atr>=4%",         0.04,  0),
-    ("atr>=5%",         0.05,  0),
-    ("atr>=4%+adx40",   0.04, 40),
-    ("atr>=5%+adx40",   0.05, 40),
-]
+ATR_MIN = 0.05     # fixed per-coin quality filter (best from v4)
+ADX_MIN = 40.0
+FEARS = [1.30, 1.20, 1.15, 1.10, 1.05]   # stable-ratio fear-gauge thresholds to test
 
 
 def simulate_exit(highs, lows, closes, ep, atr, cfg):
@@ -110,8 +103,8 @@ def simulate_exit(highs, lows, closes, ep, atr, cfg):
 
 def main():
     os.makedirs(OUT, exist_ok=True)
-    # record every taken trade once: (net, atr_ratio, adx, month)
-    recs = []
+    # per fear-threshold accumulators of (net, month)
+    acc = {f: [] for f in FEARS}
     for mname, (s, e) in MONTHS.items():
         start, end = parse(s), parse(e)
         ff = start - PB.WARMUP_BARS * FOUR_H
@@ -120,51 +113,53 @@ def main():
               for sym, df in raw.items()}
         times = sorted({int(t) for df in ps.values() for t in df.index if start <= t <= end})
         sr = PB.build_stable_ratio(ff, end)
-        sblock = {t: (np.isfinite(v) and v > S.STABLE_RATIO_MAX) for t, v in sr.items()}
-        open_until = {}
-        for t in times:
-            open_until = {sy: u for sy, u in open_until.items() if u > t}
-            if sblock.get(t, False) or len(open_until) >= MAX_CONC:
-                continue
-            cands = []
-            for sym, df in ps.items():
-                if sym in open_until or t not in df.index:
+        for fear in FEARS:
+            sblock = {t: (np.isfinite(v) and v > fear) for t, v in sr.items()}
+            open_until = {}
+            for t in times:
+                open_until = {sy: u for sy, u in open_until.items() if u > t}
+                if sblock.get(t, False) or len(open_until) >= MAX_CONC:
                     continue
-                row = df.loc[t]
-                if bool(row["entry_signal"]):
-                    cands.append((sym, float(row["close"]), float(row["atr"]),
-                                  float(row["vol_pit"]), float(row["adx"])))
-            cands.sort(key=lambda x: x[3], reverse=True)
-            for sym, price, atr, _, adx in cands[:MAX_CONC - len(open_until)]:
-                open_until[sym] = t + HOLD_H * 3600 * 1000
-                d = HR.load_range(sym, "1m", t + 1, t + HOLD_H * 3600 * 1000)
-                if d is None or len(d) < 5:
-                    continue
-                hi = d["high"].to_numpy(float); lo = d["low"].to_numpy(float)
-                cl = d["close"].to_numpy(float)
-                r = simulate_exit(hi, lo, cl, price, atr, EXIT)
-                recs.append((r * 100 - FEE, atr / price, adx, mname))
-        print(f"  {mname}: cumulative {len(recs)} trades", flush=True)
+                cands = []
+                for sym, df in ps.items():
+                    if sym in open_until or t not in df.index:
+                        continue
+                    row = df.loc[t]
+                    if not bool(row["entry_signal"]):
+                        continue
+                    price = float(row["close"]); atr = float(row["atr"]); adx = float(row["adx"])
+                    if atr / price < ATR_MIN or adx < ADX_MIN:    # per-coin quality filter
+                        continue
+                    cands.append((sym, price, atr, float(row["vol_pit"])))
+                cands.sort(key=lambda x: x[3], reverse=True)
+                for sym, price, atr, _ in cands[:MAX_CONC - len(open_until)]:
+                    open_until[sym] = t + HOLD_H * 3600 * 1000
+                    d = HR.load_range(sym, "1m", t + 1, t + HOLD_H * 3600 * 1000)
+                    if d is None or len(d) < 5:
+                        continue
+                    hi = d["high"].to_numpy(float); lo = d["low"].to_numpy(float)
+                    cl = d["close"].to_numpy(float)
+                    r = simulate_exit(hi, lo, cl, price, atr, EXIT)
+                    acc[fear].append((r * 100 - FEE, mname))
+        print(f"  {mname} done", flush=True)
         del ps, raw; gc.collect()
 
-    nets = np.array([x[0] for x in recs]); arx = np.array([x[1] for x in recs])
-    adxx = np.array([x[2] for x in recs]); mon = [x[3] for x in recs]
-    print(f"\n##### PER-COIN QUALITY FILTERS on NOSTOP_T ({len(recs)} trades), no BTC gate #####")
-    print(f"{'filter':<16}{'trades':>7}{'avg%':>8}{'WR':>6}{'PF':>7}   per-month return ($2000,12.5%)")
-    print("-" * 80)
-    for name, amin, dmin in FILTERS:
-        m = (arx >= amin) & (adxx >= dmin)
-        n = nets[m]
+    print(f"\n##### FEAR-GAUGE SENSITIVITY (NOSTOP_T + atr>={ATR_MIN:.0%}+adx>={ADX_MIN:.0f}, no BTC) #####")
+    print(f"{'fear<=':<9}{'trades':>7}{'avg%':>8}{'WR':>6}{'PF':>7}   per-month return ($2000,12.5%)")
+    print("-" * 78)
+    for fear in FEARS:
+        rows = acc[fear]
+        n = np.array([x[0] for x in rows])
         if len(n) == 0:
             continue
         wins = n[n > 0]; losses = n[n <= 0]
         pf = wins.sum() / -losses.sum() if losses.sum() < 0 else float("inf")
         wr = (n > 0).mean() * 100
         pm = {mm: 0.0 for mm in MONTHS}
-        for net_i, mm in zip(nets[m], [mon[i] for i in range(len(mon)) if m[i]]):
+        for net_i, mm in rows:
             pm[mm] += net_i * 0.125
         pms = " ".join(f"{mm[2:]}:{pm[mm]:+.0f}" for mm in MONTHS)
-        print(f"{name:<16}{len(n):>7}{n.mean():>7.2f}%{wr:>5.0f}%{pf:>7.2f}   {pms}", flush=True)
+        print(f"{fear:<9.2f}{len(n):>7}{n.mean():>7.2f}%{wr:>5.0f}%{pf:>7.2f}   {pms}", flush=True)
     print("\nDONE_EXIT_OPTIMIZER.", flush=True)
 
 
