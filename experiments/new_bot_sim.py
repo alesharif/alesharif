@@ -43,7 +43,7 @@ MONTHS = {"2025-12": ("2025-12-01", "2026-01-01"),
           "2026-03": ("2026-03-01", "2026-04-01"),
           "2026-04": ("2026-04-01", "2026-05-01"),
           "2026-05": ("2026-05-01", "2026-06-01")}
-MODES = ["NEW_4h_trail", "OLD_30s_trail"]
+MODES = ["NEWCLOSE_4h_trail", "NEW_4h_trail", "OLD_30s_trail"]
 
 
 def parse(d):
@@ -98,6 +98,42 @@ def exit_new(symbol, et, ep, atr, end):
     return None, None, "OPEN"
 
 
+def exit_newclose(symbol, et, ep, atr, end):
+    """USER'S ACTUAL idea: trail raised at each 4h close from the CLOSE price
+    (not the wick high), so the stop is always below market — no fictitious fill.
+    Stop monitored every 30s with realistic market fills."""
+    sl = ep - SL_ATR * atr; peak = ep; trailing = False
+    five = HR.load_range(symbol, "5m", et + 1, end)
+    if five is None or not len(five):
+        return None, None, "OPEN"
+    for _, c in five.iterrows():
+        hi, lo = float(c["high"]), float(c["low"])
+        cl = float(c["close"]); ct = int(c["close_time"])
+        # ---- 30s stop monitoring (realistic fill at market, never above sl) ----
+        if lo <= sl:
+            day = pd.Timestamp(int(c["time"]), unit="ms").strftime("%Y-%m-%d")
+            s = sec_day(symbol, day)
+            if s is not None and len(s):
+                seg = s[(s["time"] >= c["time"]) & (s["time"] <= c["close_time"])]
+                if len(seg):
+                    for _, s1 in seg.iloc[::30].iterrows():
+                        p = float(s1["close"])
+                        if p <= sl:
+                            return int(s1["time"]), p, "X"
+                else:
+                    return int(c["close_time"]), min(sl, cl), "X"
+            else:
+                return int(c["close_time"]), min(sl, cl), "X"
+        # ---- raise trail ONLY at a 4h close, FROM THE CLOSE PRICE (not the high) ----
+        if (ct + 1) % FOUR_H == 0:
+            if cl > peak:
+                peak = cl
+                if (peak - ep) >= ACTIVATE * atr:
+                    trailing = True
+                    sl = max(sl, peak - TRAIL * atr)
+    return None, None, "OPEN"
+
+
 def exit_old(symbol, et, ep, atr, end):
     """OLD bot: 30s stop monitor + trail ratcheted continuously (every 30s/5m)."""
     peak = ep; sl = ep - SL_ATR * atr; trailing = False
@@ -137,7 +173,8 @@ def exit_old(symbol, et, ep, atr, end):
 
 
 def simulate(ps, times, end, mode, stable_block):
-    fn = exit_new if mode == "NEW_4h_trail" else exit_old
+    fn = (exit_newclose if mode == "NEWCLOSE_4h_trail"
+          else exit_new if mode == "NEW_4h_trail" else exit_old)
     open_until = {}; nets = []
     for t in times:
         open_until = {s: u for s, u in open_until.items() if u is None or u > t}
