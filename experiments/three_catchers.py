@@ -96,7 +96,7 @@ def add_catchers(df):
     df["REBOUND"] = rebound & quality
     df["UNION"] = (bo | squeeze | rebound) & quality
     for col in CATCHERS:
-        a = df[col].to_numpy(); a[:30] = False; df[col] = a
+        a = df[col].to_numpy().copy(); a[:30] = False; df[col] = a
     return df
 
 
