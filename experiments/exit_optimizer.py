@@ -54,13 +54,17 @@ def parse(d):
 
 
 # ---- exit configs: (sl_atr, [(tp_atr, frac), ...], runner_frac, trail_atr, activate_atr) ----
-CONFIGS = {
-    "NOSTOP_T":  dict(sl=99.0, tps=[], runner=1.0, trail=2.0, act=1.0),
-    "WIDE5":     dict(sl=5.0, tps=[(1.0, 0.4), (3.0, 0.3)], runner=0.3, trail=1.5, act=1.0),
-    "SCALE_RIDE": dict(sl=4.0, tps=[(2.0, 0.5)], runner=0.5, trail=2.0, act=1.0),
-}
-# BTC higher-TF regime gate: skip entries when BTC is below its ~daily-50 EMA
-REGIME_GATE = True
+EXIT = dict(sl=99.0, tps=[], runner=1.0, trail=2.0, act=1.0)   # NOSTOP_T (wide trail)
+REGIME_GATE = False                                            # BTC gate OFF (too blunt)
+# per-coin quality filters to test: (name, atr_ratio_min, adx_min)
+FILTERS = [
+    ("none",            0.00,  0),
+    ("atr>=3%",         0.03,  0),
+    ("atr>=4%",         0.04,  0),
+    ("atr>=5%",         0.05,  0),
+    ("atr>=4%+adx40",   0.04, 40),
+    ("atr>=5%+adx40",   0.05, 40),
+]
 
 
 def simulate_exit(highs, lows, closes, ep, atr, cfg):
@@ -106,9 +110,8 @@ def simulate_exit(highs, lows, closes, ep, atr, cfg):
 
 def main():
     os.makedirs(OUT, exist_ok=True)
-    # accumulators per config
-    acc = {name: dict(nets=[], caps=[], pm={m: [] for m in MONTHS}) for name in CONFIGS}
-    ntr = 0
+    # record every taken trade once: (net, atr_ratio, adx, month)
+    recs = []
     for mname, (s, e) in MONTHS.items():
         start, end = parse(s), parse(e)
         ff = start - PB.WARMUP_BARS * FOUR_H
@@ -118,16 +121,10 @@ def main():
         times = sorted({int(t) for df in ps.values() for t in df.index if start <= t <= end})
         sr = PB.build_stable_ratio(ff, end)
         sblock = {t: (np.isfinite(v) and v > S.STABLE_RATIO_MAX) for t, v in sr.items()}
-        btc = ps.get("BTCUSDT")
-        if btc is None:
-            btc = ps.get("BTC-USDT")
-        btc_up = {int(t): float(v) for t, v in btc["htf_uptrend"].items()} if btc is not None else {}
         open_until = {}
         for t in times:
             open_until = {sy: u for sy, u in open_until.items() if u > t}
             if sblock.get(t, False) or len(open_until) >= MAX_CONC:
-                continue
-            if REGIME_GATE and btc_up.get(t, 1.0) < 0.5:   # skip entries when BTC downtrend
                 continue
             cands = []
             for sym, df in ps.items():
@@ -135,39 +132,39 @@ def main():
                     continue
                 row = df.loc[t]
                 if bool(row["entry_signal"]):
-                    cands.append((sym, float(row["close"]), float(row["atr"]), float(row["vol_pit"])))
+                    cands.append((sym, float(row["close"]), float(row["atr"]),
+                                  float(row["vol_pit"]), float(row["adx"])))
             cands.sort(key=lambda x: x[3], reverse=True)
-            for sym, price, atr, _ in cands[:MAX_CONC - len(open_until)]:
+            for sym, price, atr, _, adx in cands[:MAX_CONC - len(open_until)]:
                 open_until[sym] = t + HOLD_H * 3600 * 1000
                 d = HR.load_range(sym, "1m", t + 1, t + HOLD_H * 3600 * 1000)
                 if d is None or len(d) < 5:
                     continue
                 hi = d["high"].to_numpy(float); lo = d["low"].to_numpy(float)
                 cl = d["close"].to_numpy(float)
-                mfe = (hi.max() / price - 1) * 100
-                ntr += 1
-                for name, cfg in CONFIGS.items():
-                    r = simulate_exit(hi, lo, cl, price, atr, cfg)
-                    net = r * 100 - FEE
-                    acc[name]["nets"].append(net)
-                    acc[name]["pm"][mname].append(net)
-                    if mfe > 0.5:
-                        acc[name]["caps"].append(max(net, -50) / mfe)
-        print(f"  {mname}: cumulative {ntr} trades", flush=True)
+                r = simulate_exit(hi, lo, cl, price, atr, EXIT)
+                recs.append((r * 100 - FEE, atr / price, adx, mname))
+        print(f"  {mname}: cumulative {len(recs)} trades", flush=True)
         del ps, raw; gc.collect()
 
-    print(f"\n##### EXIT OPTIMIZER ({ntr} trades) #####")
-    print(f"{'config':<9}{'avg net%':>10}{'WR':>6}{'PF':>7}{'capture%':>10}   per-month return ($2000,12.5%)")
-    print("-" * 82)
-    for name in CONFIGS:
-        nets = np.array(acc[name]["nets"])
-        wins = nets[nets > 0]; losses = nets[nets <= 0]
+    nets = np.array([x[0] for x in recs]); arx = np.array([x[1] for x in recs])
+    adxx = np.array([x[2] for x in recs]); mon = [x[3] for x in recs]
+    print(f"\n##### PER-COIN QUALITY FILTERS on NOSTOP_T ({len(recs)} trades), no BTC gate #####")
+    print(f"{'filter':<16}{'trades':>7}{'avg%':>8}{'WR':>6}{'PF':>7}   per-month return ($2000,12.5%)")
+    print("-" * 80)
+    for name, amin, dmin in FILTERS:
+        m = (arx >= amin) & (adxx >= dmin)
+        n = nets[m]
+        if len(n) == 0:
+            continue
+        wins = n[n > 0]; losses = n[n <= 0]
         pf = wins.sum() / -losses.sum() if losses.sum() < 0 else float("inf")
-        wr = (nets > 0).mean() * 100 if len(nets) else 0
-        pmret = {m: (np.array(v).sum() * 0.125 if v else 0.0) for m, v in acc[name]["pm"].items()}
-        pms = " ".join(f"{m[2:]}:{pmret[m]:+.0f}" for m in MONTHS)
-        cap = np.median(acc[name]["caps"]) * 100 if acc[name]["caps"] else 0
-        print(f"{name:<9}{nets.mean():>9.2f}%{wr:>5.0f}%{pf:>7.2f}{cap:>9.0f}%   {pms}", flush=True)
+        wr = (n > 0).mean() * 100
+        pm = {mm: 0.0 for mm in MONTHS}
+        for net_i, mm in zip(nets[m], [mon[i] for i in range(len(mon)) if m[i]]):
+            pm[mm] += net_i * 0.125
+        pms = " ".join(f"{mm[2:]}:{pm[mm]:+.0f}" for mm in MONTHS)
+        print(f"{name:<16}{len(n):>7}{n.mean():>7.2f}%{wr:>5.0f}%{pf:>7.2f}   {pms}", flush=True)
     print("\nDONE_EXIT_OPTIMIZER.", flush=True)
 
 
