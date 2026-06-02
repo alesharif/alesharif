@@ -55,12 +55,12 @@ def parse(d):
 
 # ---- exit configs: (sl_atr, [(tp_atr, frac), ...], runner_frac, trail_atr, activate_atr) ----
 CONFIGS = {
-    "CUR":     dict(sl=1.5, tps=[], runner=1.0, trail=0.2, act=0.2),
-    "WIDE3.5": dict(sl=3.5, tps=[(1.0, 0.4), (3.0, 0.3)], runner=0.3, trail=1.5, act=1.0),
-    "WIDE5":   dict(sl=5.0, tps=[(1.0, 0.4), (3.0, 0.3)], runner=0.3, trail=1.5, act=1.0),
-    "NOSTOP":  dict(sl=99.0, tps=[(1.0, 0.4), (3.0, 0.3)], runner=0.3, trail=1.5, act=1.0),
-    "NOSTOP_T": dict(sl=99.0, tps=[], runner=1.0, trail=2.0, act=1.0),
+    "NOSTOP_T":  dict(sl=99.0, tps=[], runner=1.0, trail=2.0, act=1.0),
+    "WIDE5":     dict(sl=5.0, tps=[(1.0, 0.4), (3.0, 0.3)], runner=0.3, trail=1.5, act=1.0),
+    "SCALE_RIDE": dict(sl=4.0, tps=[(2.0, 0.5)], runner=0.5, trail=2.0, act=1.0),
 }
+# BTC higher-TF regime gate: skip entries when BTC is below its ~daily-50 EMA
+REGIME_GATE = True
 
 
 def simulate_exit(highs, lows, closes, ep, atr, cfg):
@@ -118,10 +118,14 @@ def main():
         times = sorted({int(t) for df in ps.values() for t in df.index if start <= t <= end})
         sr = PB.build_stable_ratio(ff, end)
         sblock = {t: (np.isfinite(v) and v > S.STABLE_RATIO_MAX) for t, v in sr.items()}
+        btc = ps.get("BTCUSDT") or ps.get("BTC-USDT")
+        btc_up = {int(t): float(v) for t, v in btc["htf_uptrend"].items()} if btc is not None else {}
         open_until = {}
         for t in times:
             open_until = {sy: u for sy, u in open_until.items() if u > t}
             if sblock.get(t, False) or len(open_until) >= MAX_CONC:
+                continue
+            if REGIME_GATE and btc_up.get(t, 1.0) < 0.5:   # skip entries when BTC downtrend
                 continue
             cands = []
             for sym, df in ps.items():
