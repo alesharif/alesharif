@@ -1,21 +1,23 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Indicator-based exits (user's idea): exit when price closes below an EMA, or
-on a fast/slow EMA crossover — vs the wide 2*ATR trailing stop.
+"""Which indicator gives the best PUMP EXIT? Compare on real 1m paths.
 
-Entry set: 4h entry_signal + stable-ratio fear gate (1.15) + per-coin quality
-filter (atr_ratio>=5% & adx>=40)  [the best base so far]. Exit choices, each
-with a protective hard stop (2*ATR), tested on the real 1m path (48h):
+Entry base (best so far): 4h entry_signal + stable-ratio fear gate 1.15 +
+per-coin quality (atr_ratio>=5% & adx>=40). Each exit = a protective 2*ATR hard
+stop (monitored on 1m) PLUS an indicator trigger evaluated at each candle close
+of its timeframe; we exit at whichever fires first.
 
-  TRAIL_2ATR : benchmark — wide 2*ATR trailing stop, no indicator
-  EMA15_20   : exit when a 15m candle CLOSES below EMA20(15m)
-  EMA15_50   : ... below EMA50(15m)
-  EMA60_10   : exit when a 1h candle CLOSES below EMA10(1h)
-  EMA60_20   : ... below EMA20(1h)
-  XEMA15     : exit on EMA9<EMA21 crossover (15m)
+Exits tested:
+  TRAIL_2ATR : benchmark, wide 2*ATR trailing stop (no indicator)
+  EMA15_7    : 15m close below EMA7
+  EMA15_20   : 15m close below EMA20
+  EMA60_20   : 1h  close below EMA20
+  STOCHRSI15 : 15m StochRSI %K crosses below %D (bearish)
+  MACD15     : 15m MACD line below signal (DIF<DEA)
+  KDJ15      : 15m KDJ  K below D (bearish)
 
-Realistic fills: indicator exit at the candle close we observe; hard stop at the
-level. Run:  python experiments/indicator_exit.py
+Realistic fills: indicator exit at the observed close; hard stop at its level.
+Run:  python experiments/indicator_exit.py
 """
 
 from __future__ import annotations
@@ -43,27 +45,68 @@ MONTHS = {"2025-12": ("2025-12-01", "2026-01-01"),
           "2026-03": ("2026-03-01", "2026-04-01"),
           "2026-04": ("2026-04-01", "2026-05-01"),
           "2026-05": ("2026-05-01", "2026-06-01")}
+CONFIGS = ["TRAIL_2ATR", "EMA15_7", "EMA15_20", "EMA60_20", "STOCHRSI15", "MACD15", "KDJ15"]
 
 
 def parse(d):
     return int(pd.Timestamp(d, tz="UTC").timestamp() * 1000)
 
 
-def resample(tmin, hi, lo, cl, tf_min):
-    """Resample 1m arrays to tf_min-minute candles. Returns (close, close_time)."""
-    n = len(cl)
-    grp = (np.arange(n) // tf_min)
-    closes = []; cts = []
-    for g in range(grp[-1] + 1):
+def ema(a, span):
+    return pd.Series(a).ewm(span=span, adjust=False).mean().to_numpy()
+
+
+def resample_ohlc(tmin, hi, lo, cl, tf_min):
+    n = len(cl); grp = np.arange(n) // tf_min
+    H = []; L = []; C = []; T = []
+    for g in range(int(grp[-1]) + 1):
         m = grp == g
         if not m.any():
             continue
-        closes.append(cl[m][-1]); cts.append(tmin[m][-1])
-    return np.array(closes), np.array(cts)
+        H.append(hi[m].max()); L.append(lo[m].min()); C.append(cl[m][-1]); T.append(tmin[m][-1])
+    return np.array(H), np.array(L), np.array(C), np.array(T)
 
 
-def ema(a, span):
-    return pd.Series(a).ewm(span=span, adjust=False).mean().to_numpy()
+def rsi(c, n=14):
+    d = np.diff(c, prepend=c[0]); up = np.where(d > 0, d, 0.0); dn = np.where(d < 0, -d, 0.0)
+    ru = pd.Series(up).ewm(alpha=1 / n, adjust=False).mean().to_numpy()
+    rd = pd.Series(dn).ewm(alpha=1 / n, adjust=False).mean().to_numpy()
+    rs = ru / np.where(rd > 1e-12, rd, np.nan)
+    return 100 - 100 / (1 + rs)
+
+
+def sig_stochrsi(H, L, C):
+    r = rsi(C, 14); rs = pd.Series(r)
+    lo = rs.rolling(14).min(); hi = rs.rolling(14).max()
+    st = ((rs - lo) / (hi - lo).replace(0, np.nan) * 100)
+    k = st.rolling(3).mean(); d = k.rolling(3).mean()
+    return (k < d).to_numpy(), 17
+
+
+def sig_macd(H, L, C):
+    dif = ema(C, 12) - ema(C, 26); dea = ema(dif, 9)
+    return (dif < dea), 26
+
+
+def sig_kdj(H, L, C):
+    n = 9
+    lown = pd.Series(L).rolling(n).min().to_numpy()
+    highn = pd.Series(H).rolling(n).max().to_numpy()
+    rsv = (C - lown) / np.where((highn - lown) > 1e-12, highn - lown, np.nan) * 100
+    k = np.full(len(C), 50.0); d = np.full(len(C), 50.0)
+    for i in range(1, len(C)):
+        rv = rsv[i] if np.isfinite(rsv[i]) else 50.0
+        k[i] = 2 / 3 * k[i - 1] + 1 / 3 * rv
+        d[i] = 2 / 3 * d[i - 1] + 1 / 3 * k[i]
+    return (k < d), n + 1
+
+
+def hard_stop_idx(lo, ep, atr):
+    sl = ep - HARD_SL_ATR * atr
+    for i in range(len(lo)):
+        if lo[i] <= sl:
+            return i, sl
+    return None, sl
 
 
 def exit_trail(hi, lo, cl, ep, atr):
@@ -80,57 +123,37 @@ def exit_trail(hi, lo, cl, ep, atr):
     return cl[-1] / ep - 1
 
 
-def exit_ema(tmin, hi, lo, cl, ep, atr, tf_min, span, span2=None):
-    """Hard stop (2ATR) on 1m + exit when a tf candle closes below EMA(span)
-    (or EMA(span) < EMA(span2) crossover if span2 given). Fill at that close."""
-    sl = ep - HARD_SL_ATR * atr
-    # find hard-stop time
-    sl_idx = None
-    for i in range(len(cl)):
-        if lo[i] <= sl:
-            sl_idx = i; break
-    closes, cts = resample(tmin, hi, lo, cl, tf_min)
-    if len(closes) < (span2 or span) + 1:
-        # not enough tf candles; fall back to stop or end
-        if sl_idx is not None:
-            return min(sl, cl[sl_idx]) / ep - 1
-        return cl[-1] / ep - 1
-    e1 = ema(closes, span)
-    if span2:
-        e2 = ema(closes, span2)
-        sig = e1 < e2
-    else:
-        sig = closes < e1
-    ema_ct = None; ema_px = None
-    warm = (span2 or span)
-    for j in range(warm, len(closes)):
-        if sig[j]:
-            ema_ct = cts[j]; ema_px = closes[j]; break
-    sl_ct = tmin[sl_idx] if sl_idx is not None else None
-    # whichever triggers first in time
-    if sl_ct is not None and (ema_ct is None or sl_ct <= ema_ct):
+def exit_indicator(tmin, hi, lo, cl, ep, atr, tf_min, sigfn):
+    sl_idx, sl = hard_stop_idx(lo, ep, atr)
+    sl_t = tmin[sl_idx] if sl_idx is not None else None
+    H, L, C, T = resample_ohlc(tmin, hi, lo, cl, tf_min)
+    sig, warm = sigfn(H, L, C)
+    ind_t = ind_px = None
+    for j in range(warm, len(C)):
+        if bool(sig[j]):
+            ind_t = T[j]; ind_px = C[j]; break
+    if sl_t is not None and (ind_t is None or sl_t <= ind_t):
         return min(sl, cl[sl_idx]) / ep - 1
-    if ema_ct is not None:
-        return ema_px / ep - 1
+    if ind_t is not None:
+        return ind_px / ep - 1
     return cl[-1] / ep - 1
-
-
-CONFIGS = ["TRAIL_2ATR", "EMA15_20", "EMA15_50", "EMA60_10", "EMA60_20", "XEMA15"]
 
 
 def run_exit(name, tmin, hi, lo, cl, ep, atr):
     if name == "TRAIL_2ATR":
         return exit_trail(hi, lo, cl, ep, atr)
+    if name == "EMA15_7":
+        return exit_indicator(tmin, hi, lo, cl, ep, atr, 15, lambda H, L, C: (C < ema(C, 7), 8))
     if name == "EMA15_20":
-        return exit_ema(tmin, hi, lo, cl, ep, atr, 15, 20)
-    if name == "EMA15_50":
-        return exit_ema(tmin, hi, lo, cl, ep, atr, 15, 50)
-    if name == "EMA60_10":
-        return exit_ema(tmin, hi, lo, cl, ep, atr, 60, 10)
+        return exit_indicator(tmin, hi, lo, cl, ep, atr, 15, lambda H, L, C: (C < ema(C, 20), 21))
     if name == "EMA60_20":
-        return exit_ema(tmin, hi, lo, cl, ep, atr, 60, 20)
-    if name == "XEMA15":
-        return exit_ema(tmin, hi, lo, cl, ep, atr, 15, 9, span2=21)
+        return exit_indicator(tmin, hi, lo, cl, ep, atr, 60, lambda H, L, C: (C < ema(C, 20), 21))
+    if name == "STOCHRSI15":
+        return exit_indicator(tmin, hi, lo, cl, ep, atr, 15, sig_stochrsi)
+    if name == "MACD15":
+        return exit_indicator(tmin, hi, lo, cl, ep, atr, 15, sig_macd)
+    if name == "KDJ15":
+        return exit_indicator(tmin, hi, lo, cl, ep, atr, 15, sig_kdj)
     return cl[-1] / ep - 1
 
 
@@ -165,7 +188,7 @@ def main():
             for sym, price, atr, _ in cands[:MAX_CONC - len(open_until)]:
                 open_until[sym] = t + HOLD_H * 3600 * 1000
                 d = HR.load_range(sym, "1m", t + 1, t + HOLD_H * 3600 * 1000)
-                if d is None or len(d) < 30:
+                if d is None or len(d) < 60:
                     continue
                 tmin = d["time"].to_numpy(); hi = d["high"].to_numpy(float)
                 lo = d["low"].to_numpy(float); cl = d["close"].to_numpy(float)
