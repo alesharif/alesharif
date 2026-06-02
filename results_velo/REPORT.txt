@@ -1,0 +1,17 @@
+=== VELOCITY at launch (15m): pump vs normal (all chunks) ===
+metric          PUMP mean  NORMAL mean  separation
+--------------------------------------------------
+vel 15min           0.38%        0.00%       0.15
+vel 30min           0.66%        0.00%       0.18
+vel 60min           1.07%        0.00%       0.21
+vol burst x         2.15%        1.09%       0.22
+
+=== EARLY-CATCH potential (velocity >= X) ===
+  30min vel>=3% : catches 14% of pumps, false on 1% of normals
+  30min vel>=5% : catches 8% of pumps, false on 0% of normals
+  30min vel>=8% : catches 5% of pumps, false on 0% of normals
+  60min vel>=3% : catches 20% of pumps, false on 1% of normals
+  60min vel>=5% : catches 12% of pumps, false on 0% of normals
+  60min vel>=8% : catches 7% of pumps, false on 0% of normals
+
+DONE_VELO
