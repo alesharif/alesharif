@@ -39,7 +39,8 @@ FOUR_H = 4 * 3600 * 1000
 OUT = "results_new_bot_sim"
 _SEC = {}
 
-MONTHS = {"2026-03": ("2026-03-01", "2026-04-01"),
+MONTHS = {"2025-12": ("2025-12-01", "2026-01-01"),
+          "2026-03": ("2026-03-01", "2026-04-01"),
           "2026-04": ("2026-04-01", "2026-05-01"),
           "2026-05": ("2026-05-01", "2026-06-01")}
 MODES = ["NEW_4h_trail", "OLD_30s_trail"]
@@ -68,22 +69,24 @@ def exit_new(symbol, et, ep, atr, end):
         ct = int(c["close_time"])
         if hi > cur4h_high:
             cur4h_high = hi
-        # ---- 30s stop monitoring (book exit at the stop LEVEL) ----
+        # ---- 30s stop monitoring (REALISTIC fill: at market, never above sl) ----
         if lo <= sl:
             day = pd.Timestamp(int(c["time"]), unit="ms").strftime("%Y-%m-%d")
             s = sec_day(symbol, day)
             if s is not None and len(s):
                 seg = s[(s["time"] >= c["time"]) & (s["time"] <= c["close_time"])]
                 if len(seg):
-                    hit = False
                     for _, s1 in seg.iloc[::30].iterrows():   # sample every 30s
-                        if float(s1["close"]) <= sl:           # 30s-polled last price
-                            return int(s1["time"]), sl, "X"
+                        p = float(s1["close"])                 # 30s-polled last price
+                        if p <= sl:
+                            # fill at the actual market price (= p, which is <= sl),
+                            # NEVER above market — removes the 4h-trail fictitious fill
+                            return int(s1["time"]), p, "X"
                     # dipped between 30s samples but no sample caught it -> bot misses it
                 else:
-                    return int(c["close_time"]), sl, "X"
+                    return int(c["close_time"]), min(sl, float(c["close"])), "X"
             else:
-                return int(c["close_time"]), sl, "X"
+                return int(c["close_time"]), min(sl, float(c["close"])), "X"
         # ---- raise trailing ONLY at a 4h candle close (from the 4h high) ----
         if (ct + 1) % FOUR_H == 0:
             if cur4h_high > peak:
