@@ -125,10 +125,10 @@ def exit_old(symbol, et, ep, atr, end):
                         if (peak - ep) >= ACTIVATE * atr:
                             trailing = True; sl = max(sl, peak - TRAIL * atr)
                     if pl <= sl:
-                        return int(s1["time"]), sl, "X"
+                        return int(s1["time"]), min(sl, float(s1["close"])), "X"
                 continue
         if lo <= sl:
-            return int(c["close_time"]), sl, "X"
+            return int(c["close_time"]), min(sl, float(c["close"])), "X"
         if hi > peak:
             peak = hi
             if (peak - ep) >= ACTIVATE * atr:
