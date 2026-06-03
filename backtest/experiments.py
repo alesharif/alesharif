@@ -115,6 +115,17 @@ EXPERIMENTS = {
                regime={'mode': 'stable', 'threshold': 1.15},
                quality={'atr_min': 0.05, 'adx_min': 40.0},
                entry={'mode': 'breakout_rs', 'lookback': 20, 'mom': 10, 'rs': 30}),
+    # G5/G6: مثل G4 لكن بقوة نسبية أشدّ (تفوّق على BTC بهامش)
+    'G5': dict(desc='G4 + قوة نسبية أشدّ (تفوّق على BTC بـ +5%)',
+               overrides={'STOP_LOSS_PCT': -0.025, 'EARLY_EXIT_ENABLED': True},
+               regime={'mode': 'stable', 'threshold': 1.15},
+               quality={'atr_min': 0.05, 'adx_min': 40.0},
+               entry={'mode': 'breakout_rs', 'lookback': 20, 'mom': 10, 'rs': 30, 'rs_margin': 0.05}),
+    'G6': dict(desc='G4 + قوة نسبية أشدّ جداً (تفوّق على BTC بـ +10%)',
+               overrides={'STOP_LOSS_PCT': -0.025, 'EARLY_EXIT_ENABLED': True},
+               regime={'mode': 'stable', 'threshold': 1.15},
+               quality={'atr_min': 0.05, 'adx_min': 40.0},
+               entry={'mode': 'breakout_rs', 'lookback': 20, 'mom': 10, 'rs': 30, 'rs_margin': 0.10}),
 }
 
 # أزواج العملات المستقرة (DAIUSDT غير متوفر على المرآة — يُتخطى تلقائياً)
@@ -267,6 +278,7 @@ def run_one(exp_id, capital=5000.0, year=2025, workers=4):
         bt.breakout_lookback = en.get('lookback', 20)
         bt.breakout_mom = en.get('mom', 10)
         bt.rs_lookback = en.get('rs', 30)
+        bt.rs_margin = en.get('rs_margin', 0.0)
     bt.preload_4h(workers=workers)
     bt.preload_daily(workers=workers)
     bt.run()

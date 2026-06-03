@@ -282,6 +282,7 @@ class Backtester:
         self.breakout_lookback = 20
         self.breakout_mom = 10
         self.rs_lookback = 30          # شموع 4h لحساب القوة النسبية مقابل BTC
+        self.rs_margin = 0.0           # يجب أن يتفوّق على BTC بهذا الهامش (مثلاً 0.05 = +5%)
 
     # ─── log ───
     def _log(self, msg):
@@ -475,7 +476,7 @@ class Backtester:
                     if ei < self.rs_lookback or btc_ret is None:
                         continue
                     coin_ret = float(s4.close[ei]) / float(s4.close[ei - self.rs_lookback]) - 1.0
-                    if coin_ret <= btc_ret:
+                    if coin_ret <= btc_ret + self.rs_margin:
                         continue
             current_price = sig['price']
             # فلتر جودة الدخول (ATR/ADX) — معطّل افتراضياً
