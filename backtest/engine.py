@@ -40,10 +40,39 @@ WARMUP_1D_START = datetime(2024, 5, 1, tzinfo=timezone.utc)
 # تحميل + precompute بيانات العملة
 # ═══════════════════════════════════════════════════════════════════
 
+def _atr_ratio_series(high, low, close, period=14):
+    """ATR(Wilder)/price — تذبذب نسبي. سببي (يستخدم الماضي فقط)."""
+    h = np.asarray(high, float); l = np.asarray(low, float); c = np.asarray(close, float)
+    prev_close = np.concatenate([[c[0]], c[:-1]])
+    tr = np.maximum.reduce([h - l, np.abs(h - prev_close), np.abs(l - prev_close)])
+    atr = pd.Series(tr).ewm(alpha=1 / period, adjust=False).mean().to_numpy()
+    return atr / np.where(c > 0, c, np.nan)
+
+
+def _adx_series(high, low, close, period=14):
+    """ADX(Wilder) — قوة الاتجاه 0..100. سببي."""
+    h = np.asarray(high, float); l = np.asarray(low, float); c = np.asarray(close, float)
+    n = len(c)
+    if n < period * 2:
+        return np.full(n, np.nan)
+    up = np.zeros(n); dn = np.zeros(n)
+    up[1:] = h[1:] - h[:-1]; dn[1:] = l[:-1] - l[1:]
+    plus_dm = np.where((up > dn) & (up > 0), up, 0.0)
+    minus_dm = np.where((dn > up) & (dn > 0), dn, 0.0)
+    prev_close = np.concatenate([[c[0]], c[:-1]])
+    tr = np.maximum.reduce([h - l, np.abs(h - prev_close), np.abs(l - prev_close)])
+    atr = pd.Series(tr).ewm(alpha=1 / period, adjust=False).mean().to_numpy()
+    pdi = 100 * pd.Series(plus_dm).ewm(alpha=1 / period, adjust=False).mean().to_numpy() / np.where(atr > 1e-12, atr, np.nan)
+    mdi = 100 * pd.Series(minus_dm).ewm(alpha=1 / period, adjust=False).mean().to_numpy() / np.where(atr > 1e-12, atr, np.nan)
+    dx = 100 * np.abs(pdi - mdi) / np.where((pdi + mdi) > 1e-12, pdi + mdi, np.nan)
+    return pd.Series(np.nan_to_num(dx)).ewm(alpha=1 / period, adjust=False).mean().to_numpy()
+
+
 class Symbol4H:
-    """شموع 4h لعملة مع مؤشرات MACD/RSI/OBV محسوبة مسبقاً على كامل السلسلة."""
+    """شموع 4h لعملة مع مؤشرات MACD/RSI/OBV/ATR/ADX محسوبة مسبقاً على كامل السلسلة."""
     __slots__ = ('symbol', 'open_time', 'close_time', 'open', 'high', 'low',
-                 'close', 'volume', 'quote_volume', 'macd', 'rsi', 'obv', 'n')
+                 'close', 'volume', 'quote_volume', 'macd', 'rsi', 'obv',
+                 'atr_ratio', 'adx', 'n')
 
     def __init__(self, symbol, df):
         self.symbol = symbol
@@ -60,6 +89,9 @@ class Symbol4H:
         self.macd = S.calc_macd(self.close, S.MACD_FAST, S.MACD_SLOW)
         self.rsi = S.calc_rsi(self.close, S.RSI_PERIOD)
         self.obv = S.calc_obv(self.close, self.volume)
+        # فلتر جودة الدخول (ATR/ADX) — معطّل افتراضياً في scan
+        self.atr_ratio = _atr_ratio_series(self.high, self.low, self.close, 14)
+        self.adx = _adx_series(self.high, self.low, self.close, 14)
 
 
 class SymbolDaily:
@@ -179,6 +211,11 @@ class Backtester:
             }
         }
         self.equity_log = []  # (ts_ms, equity)
+
+        # فلتر جودة الدخول (ATR/ADX) — معطّل افتراضياً (لا يؤثر على التشغيل الأصلي)
+        self.quality_filter = False
+        self.atr_ratio_min = 0.05
+        self.adx_min = 40.0
 
     # ─── log ───
     def _log(self, msg):
@@ -354,6 +391,14 @@ class Backtester:
             if _obv and not _macd and not _rsi:
                 continue
             current_price = sig['price']
+            # فلتر جودة الدخول (ATR/ADX) — معطّل افتراضياً
+            if self.quality_filter:
+                ar = s4.atr_ratio[ei]
+                ad = s4.adx[ei]
+                if not (np.isfinite(ar) and np.isfinite(ad)):
+                    continue
+                if ar < self.atr_ratio_min or ad < self.adx_min:
+                    continue
             # A+D daily filter (#48)
             sd = self.get_daily(sym)
             di = self._daily_asof_idx(sd, t_ms) if sd else -1

@@ -62,6 +62,22 @@ EXPERIMENTS = {
     'E10': dict(desc='Stable-Ratio @1.15 + SL-2.5% + Early Exit',
                 overrides={'STOP_LOSS_PCT': -0.025, 'EARLY_EXIT_ENABLED': True},
                 regime={'mode': 'stable', 'threshold': 1.15}),
+
+    # ── فلتر جودة الدخول لكل عملة (ATR/ADX على 4h) ──
+    'E11': dict(desc='ATR/ADX جودة الدخول (ATR≥5% و ADX≥40) وحده',
+                overrides={}, regime=None,
+                quality={'atr_min': 0.05, 'adx_min': 40.0}),
+    'E12': dict(desc='ATR/ADX أساسي (ATR≥2% و ADX≥25) وحده',
+                overrides={}, regime=None,
+                quality={'atr_min': 0.02, 'adx_min': 25.0}),
+    'E13': dict(desc='ATR/ADX(5%/40) + Fear@1.15 + SL-2.5% + EarlyExit (كل شيء)',
+                overrides={'STOP_LOSS_PCT': -0.025, 'EARLY_EXIT_ENABLED': True},
+                regime={'mode': 'stable', 'threshold': 1.15},
+                quality={'atr_min': 0.05, 'adx_min': 40.0}),
+    'E14': dict(desc='ATR/ADX(5%/40) + التقاط ربح أفضل (TP+6%/trail1.5%/act+2%)',
+                overrides={'TP_THRESHOLD': 0.06, 'TRAILING_RATIO': 0.985,
+                           'TRAILING_ACTIVATE_PCT': 0.02}, regime=None,
+                quality={'atr_min': 0.05, 'adx_min': 40.0}),
 }
 
 # أزواج العملات المستقرة (DAIUSDT غير متوفر على المرآة — يُتخطى تلقائياً)
@@ -197,6 +213,11 @@ def run_one(exp_id, capital=5000.0, year=2025, workers=4):
             bt.stable_times, bt.stable_ratio = build_stable_ratio_map(year)
         else:
             bt.regime_mode = regime  # 'ema50' / 'ema99'
+    q = cfg.get('quality')
+    if q:
+        bt.quality_filter = True
+        bt.atr_ratio_min = q['atr_min']
+        bt.adx_min = q['adx_min']
     bt.preload_4h(workers=workers)
     bt.preload_daily(workers=workers)
     bt.run()
