@@ -128,7 +128,8 @@ def main():
         start, end = parse(s), parse(e)
         warm = start - 3 * 24 * 3600 * 1000
         # pre-filter to LIQUID coins using cached 4h data (avoids scanning 592 on 15m)
-        raw4 = PIT.prefetch_universe(PIT.list_all_usdt_symbols(), warm, end, log=lambda *a: None)
+        ff4 = start - PB.WARMUP_BARS * 4 * 3600 * 1000
+        raw4 = PIT.prefetch_universe(PIT.list_all_usdt_symbols(), ff4, end, log=lambda *a: None)
         syms = [sym for sym, df in raw4.items()
                 if len(df) >= 30 and (float(df["quote_av"].tail(180).mean()) * 6) >= 2_000_000]
         del raw4; gc.collect()
