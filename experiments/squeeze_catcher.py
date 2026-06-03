@@ -20,7 +20,8 @@ Run:  python experiments/squeeze_catcher.py
 
 from __future__ import annotations
 
-import gc, sys
+import gc, sys, socket
+socket.setdefaulttimeout(30)        # safety net against hung requests
 import numpy as np
 import pandas as pd
 
@@ -126,7 +127,12 @@ def main():
     for mname, (s, e) in MONTHS.items():
         start, end = parse(s), parse(e)
         warm = start - 3 * 24 * 3600 * 1000
-        syms = PIT.list_all_usdt_symbols()
+        # pre-filter to LIQUID coins using cached 4h data (avoids scanning 592 on 15m)
+        raw4 = PIT.prefetch_universe(PIT.list_all_usdt_symbols(), warm, end, log=lambda *a: None)
+        syms = [sym for sym, df in raw4.items()
+                if len(df) >= 30 and (float(df["quote_av"].tail(180).mean()) * 6) >= 2_000_000]
+        del raw4; gc.collect()
+        print(f"  ({mname}: {len(syms)} liquid coins to scan on 15m)", flush=True)
         sr = PB.build_stable_ratio(start - 40 * 4 * 3600 * 1000, end)
         sblock = {t: (np.isfinite(v) and v > FEAR) for t, v in sr.items()}
         # collect all fires across coins
