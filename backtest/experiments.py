@@ -231,9 +231,10 @@ def run_one(exp_id, capital=5000.0, year=2025, workers=4):
         f"صفقات={m['trades']}  | WR={m['wr']:.1f}%  | PF={m['pf']:.2f}  | "
         f"maxDD={m['maxdd_pct']:.1f}%  | ({elapsed:.1f}د)\n"
     )
-    with open(f'backtest/output/exp_{exp_id}_summary.txt', 'w') as f:
+    tag = f'{exp_id}_{year}'
+    with open(f'backtest/output/exp_{tag}_summary.txt', 'w') as f:
         f.write(out)
-    write_trades(bt.state, f'backtest/output/exp_{exp_id}_trades.csv')
+    write_trades(bt.state, f'backtest/output/exp_{tag}_trades.csv')
     print(out, flush=True)
     return m
 
