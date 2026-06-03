@@ -233,6 +233,11 @@ class Backtester:
         self.sim_end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
         # نسمح بإدارة الصفقات حتى 31 يوم بعد نهاية السنة لإغلاقها طبيعياً
         self.manage_end = self.sim_end + timedelta(days=31)
+        # ✅ تواريخ الإحماء نسبية للسنة (لا ثوابت مثبّتة):
+        #   4h: نحتاج ~200 شمعة (≈33 يوم) → 70 يوم احتياط
+        #   1d: نحتاج EMA99 + sigma (~110 يوم) + احتياط → 270 يوم
+        self.warmup_4h_start = self.sim_start - timedelta(days=70)
+        self.warmup_1d_start = self.sim_start - timedelta(days=270)
 
         if universe is None:
             universe = data.list_usdt_pairs()
@@ -294,7 +299,7 @@ class Backtester:
         self._log(f"تحميل 4h لـ {len(self.universe)} عملة...")
         end = self.sim_end
         def _load(sym):
-            df = data.get_klines_df(sym, '4h', WARMUP_4H_START, end)
+            df = data.get_klines_df(sym, '4h', self.warmup_4h_start, end)
             return sym, df
         done = 0
         with ThreadPoolExecutor(max_workers=workers) as ex:
@@ -317,7 +322,7 @@ class Backtester:
     def preload_daily(self, workers=16):
         self._log(f"تحميل 1d لـ {len(self.universe)} عملة...")
         def _load(sym):
-            df = data.get_klines_df(sym, '1d', WARMUP_1D_START, self.sim_end)
+            df = data.get_klines_df(sym, '1d', self.warmup_1d_start, self.sim_end)
             return sym, df
         done = 0
         with ThreadPoolExecutor(max_workers=workers) as ex:
@@ -344,7 +349,7 @@ class Backtester:
         if sym in self._daily_missing:
             return None
         try:
-            df = data.get_klines_df(sym, '1d', WARMUP_1D_START, self.sim_end)
+            df = data.get_klines_df(sym, '1d', self.warmup_1d_start, self.sim_end)
         except Exception:
             df = pd.DataFrame()
         if len(df) < 60:
