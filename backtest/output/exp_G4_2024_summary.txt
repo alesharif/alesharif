@@ -1,0 +1,3 @@
+[G4] اختراق+RS+جودة + فلتر الخوف + SL-2.5% + EarlyExit (كامل)
+  overrides={'STOP_LOSS_PCT': -0.025, 'EARLY_EXIT_ENABLED': True} regime={'mode': 'stable', 'threshold': 1.15}
+  العائد=+3.1%  | نهائي=$5,157  | صفقات=90  | WR=45.6%  | PF=1.06  | maxDD=-10.9%  | (0.2د)
