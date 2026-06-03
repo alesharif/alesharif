@@ -219,6 +219,71 @@ def breakout_signal(s4: Symbol4H, ei: int, lookback=20, mom_lookback=10):
     return out
 
 
+def breakdown_signal(s4: Symbol4H, ei: int, lookback=20, mom_lookback=10):
+    """مرآة breakout_signal للشورت: كسر Donchian أدنى + زخم سالب."""
+    out = {'has_signal': False, 'bullish_macd': False, 'bullish_rsi': False,
+           'bullish_obv': False, 'breakout': False, 'mom': 0.0,
+           'price': float(s4.close[ei]), 'volume_24h': 0.0}
+    if ei < lookback + 1 or ei < mom_lookback + 1:
+        return out
+    close_ei = float(s4.close[ei])
+    prior_low = float(s4.low[ei - lookback:ei].min())
+    mom = close_ei / float(s4.close[ei - mom_lookback]) - 1.0
+    is_breakdown = close_ei <= prior_low and mom < 0
+    out['breakout'] = bool(is_breakdown)
+    out['has_signal'] = bool(is_breakdown)
+    out['mom'] = float(mom)
+    return out
+
+
+def check_exit_short(pos, current_price, now_ts, candle=None):
+    """
+    مرآة S.check_exit لمراكز الشورت (الربح عند الهبوط):
+      • نتتبّع trough (أدنى low). SL فوق الدخول. Trailing/SmartTP معكوسة.
+    """
+    now = now_ts
+    entry = pos['entry_price']
+    check_high = candle['high'] if (candle and 'high' in candle) else current_price
+    check_low = candle['low'] if (candle and 'low' in candle) else current_price
+    if check_low < pos['trough']:
+        pos['trough'] = check_low
+    if pos.get('smart_tp_mode'):
+        if check_low < pos['smart_tp_trough']:
+            pos['smart_tp_trough'] = check_low
+    # تفعيل trailing/smart عند هبوط بنسبة معيّنة
+    if not pos.get('trail_active') and check_low <= entry * (1 - S.TRAILING_ACTIVATE_PCT):
+        pos['trail_active'] = True
+    if not pos.get('smart_tp_mode') and check_low <= pos['tp_threshold_price']:
+        pos['smart_tp_mode'] = True
+        if check_low < pos['smart_tp_trough']:
+            pos['smart_tp_trough'] = check_low
+    if pos.get('smart_tp_mode'):
+        eff_stop = pos['smart_tp_trough'] * (2 - S.SMART_TP_TRAIL_RATIO)   # فوق القاع
+    elif pos.get('trail_active'):
+        eff_stop = pos['trough'] * (2 - S.TRAILING_RATIO)
+    else:
+        eff_stop = pos['sl_price']
+    if check_high >= eff_stop:
+        if pos.get('smart_tp_mode'):
+            reason = 'SMART_TP_TRAIL'
+        elif pos.get('trail_active'):
+            reason = 'TRAILING'
+        else:
+            reason = 'STOP_LOSS'
+        return {'exit_reason': reason, 'exit_price': eff_stop, 'exit_time': now}
+    dur_h = (now - pos['entry_time']) / 3600
+    if dur_h >= S.TIME_LIMIT_HOURS and not pos.get('smart_tp_mode'):
+        return {'exit_reason': 'TIME_24H', 'exit_price': current_price, 'exit_time': now}
+    if dur_h >= S.MAX_HOLD_DAYS * 24:
+        return {'exit_reason': 'TIME_LIMIT', 'exit_price': current_price, 'exit_time': now}
+    if (S.EARLY_EXIT_ENABLED and dur_h >= S.EARLY_EXIT_HOURS
+            and not pos.get('smart_tp_mode')):
+        trough_pct = (entry - pos['trough']) / entry
+        if trough_pct < S.EARLY_EXIT_PEAK_THRESHOLD:
+            return {'exit_reason': 'EARLY_EXIT', 'exit_price': current_price, 'exit_time': now}
+    return None
+
+
 # ═══════════════════════════════════════════════════════════════════
 # المحرك
 # ═══════════════════════════════════════════════════════════════════
@@ -288,6 +353,13 @@ class Backtester:
         self.breakout_mom = 10
         self.rs_lookback = 30          # شموع 4h لحساب القوة النسبية مقابل BTC
         self.rs_margin = 0.0           # يجب أن يتفوّق على BTC بهذا الهامش (مثلاً 0.05 = +5%)
+        # Long/Short — معطّل افتراضياً
+        self.allow_short = False
+        self.short_mode = 'symmetric'  # 'symmetric' | 'regime'
+        # خريطة نسبة الخوف (لوضع regime في long/short ولـ RegimeBacktester)
+        self.stable_times = None
+        self.stable_ratio = None
+        self.stable_threshold = 1.15
 
     # ─── log ───
     def _log(self, msg):
@@ -426,22 +498,146 @@ class Backtester:
         return max(0.0, ps['liquid_capital'] - reserves)
 
     # ═══════════════════════════════════════════════════════════════
-    # المسح (مطابق search_signals)
+    # المسح (مطابق search_signals) — يدعم long/short
     # ═══════════════════════════════════════════════════════════════
+    def _btc_ret(self, t_ms):
+        btc4 = self.data4h.get('BTCUSDT')
+        if btc4 is None:
+            return None
+        bei = self._4h_closed_idx(btc4, t_ms)
+        if bei < self.rs_lookback:
+            return None
+        return float(btc4.close[bei]) / float(btc4.close[bei - self.rs_lookback]) - 1.0
+
+    def _stable_now(self, t_ms):
+        """True=خوف (نسبة المستقرة > العتبة) | False=هادئ | None=لا بيانات."""
+        if self.stable_times is None or len(self.stable_times) == 0:
+            return None
+        idx = int(np.searchsorted(self.stable_times, t_ms, side='left')) - 1
+        if idx < 0:
+            return None
+        r = self.stable_ratio[idx]
+        if not np.isfinite(r):
+            return None
+        return bool(r > self.stable_threshold)
+
+    def _eval(self, sym, s4, ei, side, t_ms, btc_ret, open_count):
+        """يقيّم عملة لجانب محدّد ('long'/'short') ويعيد candidate أو None."""
+        win_n = min(ei + 1, 200)
+        # vol_24h
+        vol_24h = float(s4.quote_volume[ei - 6:ei].sum()) if ei >= 6 else float(s4.quote_volume[:ei].sum())
+        if vol_24h < S.MIN_VOLUME_BINANCE:
+            return None
+        # ─── الإشارة ───
+        if side == 'long':
+            if self.entry_mode == 'divergence':
+                sig = fast_signal(s4, ei)
+                if not sig['has_signal']:
+                    return None
+                _obv, _macd, _rsi = sig['bullish_obv'], sig['bullish_macd'], sig['bullish_rsi']
+                if _obv and _macd:
+                    return None
+                if _obv and not _macd and not _rsi:
+                    return None
+            else:
+                sig = breakout_signal(s4, ei, self.breakout_lookback, self.breakout_mom)
+                if not sig['has_signal']:
+                    return None
+                if self.entry_mode == 'breakout_rs':
+                    if btc_ret is None:
+                        return None
+                    coin_ret = float(s4.close[ei]) / float(s4.close[ei - self.rs_lookback]) - 1.0
+                    if coin_ret <= btc_ret + self.rs_margin:
+                        return None
+        else:  # short — دائماً breakdown + ضعف نسبي
+            sig = breakdown_signal(s4, ei, self.breakout_lookback, self.breakout_mom)
+            if not sig['has_signal']:
+                return None
+            if self.entry_mode == 'breakout_rs':
+                if btc_ret is None:
+                    return None
+                coin_ret = float(s4.close[ei]) / float(s4.close[ei - self.rs_lookback]) - 1.0
+                if coin_ret >= btc_ret - self.rs_margin:   # يجب أن يكون أضعف من BTC
+                    return None
+        current_price = sig['price']
+        # جودة ATR/ADX (اتجاه-محايد)
+        if self.quality_filter:
+            ar = s4.atr_ratio[ei]; ad = s4.adx[ei]
+            if not (np.isfinite(ar) and np.isfinite(ad)):
+                return None
+            if ar < self.atr_ratio_min or ad < self.adx_min:
+                return None
+        # A+D يومي (اتجاهي — معكوس للشورت)
+        sd = self.get_daily(sym)
+        di = self._daily_asof_idx(sd, t_ms) if sd else -1
+        if sd is None or not sd.valid or di < 0:
+            cond_A = cond_D = False; ad_valid = False
+        else:
+            if side == 'long':
+                cond_A = bool(sd.close[di] >= sd.ema50[di])
+                cond_D = bool(sd.macd_line[di] > sd.macd_signal[di])
+            else:
+                cond_A = bool(sd.close[di] <= sd.ema50[di])
+                cond_D = bool(sd.macd_line[di] < sd.macd_signal[di])
+            ad_valid = not (np.isnan(sd.ema50[di]) or np.isnan(sd.macd_line[di]))
+        ad_ok, ad_reason = S.ad_priority_accept(cond_A, cond_D, ad_valid, open_count, S.MAX_OPEN_POSITIONS)
+        if not ad_ok:
+            return None
+        sig = dict(sig); sig['ad_classification'] = ad_reason
+        # F3 (اتجاهي — معكوس للشورت)
+        if S.F3_FILTER_ENABLED and sd is not None:
+            oi = self._daily_open_idx(sd, t_ms)
+            if 0 <= oi < sd.n:
+                open_today = float(sd.day_open[oi])
+                if open_today > 0:
+                    if side == 'long' and current_price <= open_today * S.F3_OPEN_MULTIPLIER:
+                        return None
+                    if side == 'short' and current_price >= open_today * (2 - S.F3_OPEN_MULTIPLIER):
+                        return None
+        # EMA99 (اتجاهي — معكوس للشورت)
+        if S.EMA99_FILTER_ENABLED:
+            ema99 = float(sd.ema99[di]) if (sd is not None and di >= 0) else 0.0
+            if ema99 <= 0 or np.isnan(ema99):
+                return None
+            if side == 'long' and current_price < ema99 * S.EMA99_TOLERANCE:
+                return None
+            if side == 'short' and current_price > ema99 * (2 - S.EMA99_TOLERANCE):
+                return None
+        # نسبة الحجم (محايد)
+        if S.VOL_RATIO_FILTER_ENABLED and ei >= S.VOL_RATIO_PERIOD:
+            vma = float(s4.volume[ei - S.VOL_RATIO_PERIOD:ei].mean())
+            if vma > 0 and (float(s4.volume[ei]) / vma) < S.VOL_RATIO_THRESHOLD:
+                return None
+        sigma = float(sd.sigma[di]) if (sd is not None and di >= 0) else 0.0
+        if sigma <= 0 or np.isnan(sigma):
+            return None
+        lookback = min(24, win_n - 1)
+        rh = s4.high[ei - lookback:ei]; rl = s4.low[ei - lookback:ei]; rc = s4.close[ei - lookback:ei]
+        avg_close = float(rc.mean()) if len(rc) else current_price
+        volatility_96h = ((float(rh.max()) - float(rl.min())) / avg_close) if avg_close > 0 and len(rh) else 0.0
+        return {
+            'symbol': sym, 'price': current_price, 'daily_volume': vol_24h,
+            'sigma': sigma, 'signals': sig, 'volatility_96h': volatility_96h,
+            'strategy_used': ['v3'], 'v4_signal': None,
+            'atr_ratio': float(s4.atr_ratio[ei]), 'side': side,
+        }
+
     def scan(self, t_ms):
         ps = self.state[PLATFORM]
         open_symbols = set(ps['open_positions'].keys())
         open_count = len(open_symbols)
         now_sec = t_ms / 1000.0
+        btc_ret = self._btc_ret(t_ms) if self.entry_mode == 'breakout_rs' else None
+        # تحديد الجوانب المسموحة هذه الدورة
+        sides = ['long']
+        if self.allow_short:
+            if self.short_mode == 'regime':
+                # تبديل: short عند الخوف، long عند الهدوء
+                fearful = (self._stable_now(t_ms) is True)
+                sides = ['short'] if fearful else ['long']
+            else:  # symmetric
+                sides = ['long', 'short']
         candidates = []
-        # القوة النسبية مقابل BTC: عائد BTC على آخر rs_lookback شمعة (سببي)
-        btc_ret = None
-        if self.entry_mode == 'breakout_rs':
-            btc4 = self.data4h.get('BTCUSDT')
-            if btc4 is not None:
-                bei = self._4h_closed_idx(btc4, t_ms)
-                if bei >= self.rs_lookback:
-                    btc_ret = float(btc4.close[bei]) / float(btc4.close[bei - self.rs_lookback]) - 1.0
         for sym in self.universe:
             if sym in open_symbols:
                 continue
@@ -449,102 +645,13 @@ class Backtester:
                 continue
             s4 = self.data4h[sym]
             ei = self._4h_closed_idx(s4, t_ms)
-            if ei < 0:
+            if ei < 0 or min(ei + 1, 200) < 50:
                 continue
-            win_n = min(ei + 1, 200)
-            if win_n < 50:
-                continue
-            # vol_24h (آخر 6 شموع مغلقة قبل الإشارة)
-            if ei >= 6:
-                vol_24h = float(s4.quote_volume[ei - 6:ei].sum())
-            else:
-                vol_24h = float(s4.quote_volume[:ei].sum())
-            if vol_24h < S.MIN_VOLUME_BINANCE:
-                continue
-            # ─── إشارة الدخول (حسب entry_mode) ───
-            if self.entry_mode == 'divergence':
-                sig = fast_signal(s4, ei)
-                if not sig['has_signal']:
-                    continue
-                # OBV filter (#47) — خاص بالـ divergence
-                _obv, _macd, _rsi = sig['bullish_obv'], sig['bullish_macd'], sig['bullish_rsi']
-                if _obv and _macd:
-                    continue
-                if _obv and not _macd and not _rsi:
-                    continue
-            else:  # 'breakout' أو 'breakout_rs'
-                sig = breakout_signal(s4, ei, self.breakout_lookback, self.breakout_mom)
-                if not sig['has_signal']:
-                    continue
-                if self.entry_mode == 'breakout_rs':
-                    # قوة نسبية: العملة تتفوّق على BTC على نفس الفترة
-                    if ei < self.rs_lookback or btc_ret is None:
-                        continue
-                    coin_ret = float(s4.close[ei]) / float(s4.close[ei - self.rs_lookback]) - 1.0
-                    if coin_ret <= btc_ret + self.rs_margin:
-                        continue
-            current_price = sig['price']
-            # فلتر جودة الدخول (ATR/ADX) — معطّل افتراضياً
-            if self.quality_filter:
-                ar = s4.atr_ratio[ei]
-                ad = s4.adx[ei]
-                if not (np.isfinite(ar) and np.isfinite(ad)):
-                    continue
-                if ar < self.atr_ratio_min or ad < self.adx_min:
-                    continue
-            # A+D daily filter (#48)
-            sd = self.get_daily(sym)
-            di = self._daily_asof_idx(sd, t_ms) if sd else -1
-            if sd is None or not sd.valid or di < 0:
-                cond_A = cond_D = False
-                ad_valid = False
-            else:
-                # البوت (calc_ad_daily): إغلاق آخر يوم مغلق مقابل EMA50 اليومي
-                cond_A = bool(sd.close[di] >= sd.ema50[di])
-                cond_D = bool(sd.macd_line[di] > sd.macd_signal[di])
-                ad_valid = not (np.isnan(sd.ema50[di]) or np.isnan(sd.macd_line[di]))
-            ad_ok, ad_reason = S.ad_priority_accept(cond_A, cond_D, ad_valid,
-                                                    open_count, S.MAX_OPEN_POSITIONS)
-            if not ad_ok:
-                continue
-            sig['ad_classification'] = ad_reason
-            # F3 filter (#51): السعر فوق افتتاح اليوم * 0.99
-            if S.F3_FILTER_ENABLED and sd is not None:
-                oi = self._daily_open_idx(sd, t_ms)
-                if 0 <= oi < sd.n:
-                    open_today = float(sd.day_open[oi])
-                    if open_today > 0 and current_price <= open_today * S.F3_OPEN_MULTIPLIER:
-                        continue
-            # EMA99 filter (#20)
-            if S.EMA99_FILTER_ENABLED:
-                ema99 = float(sd.ema99[di]) if (sd is not None and di >= 0) else 0.0
-                if ema99 <= 0 or np.isnan(ema99) or current_price < ema99 * S.EMA99_TOLERANCE:
-                    continue
-            # Vol Ratio filter (#49) — Binance
-            if S.VOL_RATIO_FILTER_ENABLED and ei >= S.VOL_RATIO_PERIOD:
-                vol_at_signal = float(s4.volume[ei])
-                vol_ma = float(s4.volume[ei - S.VOL_RATIO_PERIOD:ei].mean())
-                if vol_ma > 0:
-                    if (vol_at_signal / vol_ma) < S.VOL_RATIO_THRESHOLD:
-                        continue
-            # sigma
-            sigma = float(sd.sigma[di]) if (sd is not None and di >= 0) else 0.0
-            if sigma <= 0 or np.isnan(sigma):
-                continue
-            # volatility_96h (للترتيب)
-            lookback = min(24, win_n - 1)
-            rh = s4.high[ei - lookback:ei]
-            rl = s4.low[ei - lookback:ei]
-            rc = s4.close[ei - lookback:ei]
-            avg_close = float(rc.mean()) if len(rc) else current_price
-            volatility_96h = ((float(rh.max()) - float(rl.min())) / avg_close) if avg_close > 0 and len(rh) else 0.0
-            candidates.append({
-                'symbol': sym, 'price': current_price, 'daily_volume': vol_24h,
-                'sigma': sigma, 'signals': sig, 'volatility_96h': volatility_96h,
-                'strategy_used': ['v3'], 'v4_signal': None,
-                'atr_ratio': float(s4.atr_ratio[ei]),
-            })
-        # ترتيب composite (مطابق نهاية search_signals)
+            for side in sides:
+                c = self._eval(sym, s4, ei, side, t_ms, btc_ret, open_count)
+                if c is not None:
+                    candidates.append(c)
+                    break  # عملة واحدة لا تأخذ الجانبين معاً
         rank_candidates(candidates, self.verbose)
         return candidates
 
@@ -566,21 +673,24 @@ class Backtester:
             entry_price = cand['price']
             size = cand['final_size']
             qty = size / entry_price
-            cost_with_fee = size * (1 + FEE)
+            side = cand.get('side', 'long')
+            cost_with_fee = size * (1 + FEE)   # نقفل size + رسوم الفتح (نفس آلية long للجانبين)
             if cost_with_fee > ps['liquid_capital']:
                 continue
             ps['liquid_capital'] -= cost_with_fee
+            sl_sign = 1 if side == 'long' else -1   # short: SL فوق، TP تحت
             pos = {
                 'symbol': cand['symbol'], 'entry_time': t_ms / 1000.0,
                 'entry_time_ms': t_ms, 'entry_price': entry_price,
-                'quantity': qty, 'size_usd': size,
+                'quantity': qty, 'size_usd': size, 'side': side,
                 'sigma_at_entry': cand['sigma'],
                 'daily_volume_at_entry': cand['daily_volume'],
                 'equity_at_entry': equity, 'signals': cand['signals'],
-                'sl_price': entry_price * (1 + S.STOP_LOSS_PCT),
-                'tp_threshold_price': entry_price * (1 + S.TP_THRESHOLD),
+                'sl_price': entry_price * (1 + sl_sign * S.STOP_LOSS_PCT),
+                'tp_threshold_price': entry_price * (1 + sl_sign * S.TP_THRESHOLD),
                 'peak': entry_price, 'trail_active': False,
                 'smart_tp_mode': False, 'smart_tp_peak': entry_price,
+                'trough': entry_price, 'smart_tp_trough': entry_price,
                 'strategy_used': ['v3'],
             }
             # ATR بوحدة السعر وقت الدخول (للخروج الديناميكي)
@@ -590,13 +700,41 @@ class Backtester:
             ps['open_positions'][cand['symbol']] = pos
 
     # ═══════════════════════════════════════════════════════════════
+    # إغلاق مركز (long/short) — يحدّث liquid ويُرجع سجل الصفقة
+    # ═══════════════════════════════════════════════════════════════
+    def _close(self, pos, exit_price, exit_reason, exit_time):
+        ps = self.state[PLATFORM]
+        entry = pos['entry_price']; qty = pos['quantity']
+        size = pos['size_usd']; side = pos.get('side', 'long')
+        fees = (entry + exit_price) * qty * FEE
+        if side == 'long':
+            gross = (exit_price - entry) * qty
+            ps['liquid_capital'] += (exit_price * qty) * (1 - FEE)
+            fav = pos['peak']; fav_pct = (pos['peak'] - entry) / entry * 100
+        else:  # short: نُعيد margin المقفل + الربح، ونخصم رسوم الإغلاق
+            gross = (entry - exit_price) * qty
+            ps['liquid_capital'] += size + (entry - exit_price) * qty - (exit_price * qty) * FEE
+            fav = pos['trough']; fav_pct = (entry - pos['trough']) / entry * 100
+        net = gross - fees
+        pct = (net / size) * 100 if size > 0 else 0.0
+        return {
+            **pos, 'exit_reason': exit_reason, 'exit_price': exit_price,
+            'exit_time': exit_time, 'gross_pnl': gross, 'fees': fees,
+            'net_pnl': net, 'pnl_pct': pct,
+            'duration_hours': (exit_time - pos['entry_time']) / 3600,
+            'peak_price': fav, 'peak_pct': fav_pct,
+            'smart_tp_activated': pos.get('smart_tp_mode', False),
+            'smart_tp_peak': pos.get('smart_tp_peak', entry),
+            'platform': PLATFORM,
+        }
+
+    # ═══════════════════════════════════════════════════════════════
     # إدارة الخروج عند tick (15m)
     # ═══════════════════════════════════════════════════════════════
     def manage_exits(self, t_ms):
         ps = self.state[PLATFORM]
         if not ps['open_positions']:
             return
-        # نقيّم شمعة 15m التي أُغلقت للتو [t-15m, t) (تفادي lookahead)
         bar_open = t_ms - MS_15M
         to_close = []
         for sym, pos in list(ps['open_positions'].items()):
@@ -604,7 +742,10 @@ class Backtester:
             if candle is None:
                 continue
             now_sec = candle['close_time'] / 1000.0
-            if self.atr_exit:
+            side = pos.get('side', 'long')
+            if side == 'short':
+                res = check_exit_short(pos, candle['close'], now_sec, candle=candle)
+            elif self.atr_exit:
                 res = check_exit_atr(pos, candle['close'], now_sec,
                                      pos.get('atr_price', abs(S.STOP_LOSS_PCT) * pos['entry_price']),
                                      self.atr_sl_mult, self.atr_trail_mult,
@@ -613,21 +754,7 @@ class Backtester:
                 res = S.check_exit(pos, candle['close'], now_sec, candle=candle)
             if not res:
                 continue
-            exit_price = res['exit_price']
-            qty = pos['quantity']
-            pnl = S.calc_pnl(pos, exit_price, FEE)
-            net_proceeds = (exit_price * qty) * (1 - FEE)
-            ps['liquid_capital'] += net_proceeds
-            trade = {
-                **pos, **res, **pnl,
-                'exit_price': exit_price,
-                'duration_hours': (res['exit_time'] - pos['entry_time']) / 3600,
-                'peak_price': pos['peak'],
-                'peak_pct': ((pos['peak'] - pos['entry_price']) / pos['entry_price']) * 100,
-                'smart_tp_activated': pos.get('smart_tp_mode', False),
-                'smart_tp_peak': pos.get('smart_tp_peak', pos['entry_price']),
-                'platform': PLATFORM,
-            }
+            trade = self._close(pos, res['exit_price'], res['exit_reason'], res['exit_time'])
             to_close.append((sym, trade))
             S.update_cooldown(self.state, PLATFORM, sym, trade)
         for sym, trade in to_close:
@@ -643,19 +770,7 @@ class Backtester:
                 ei = self._4h_closed_idx(s4, t_ms)
                 if ei >= 0:
                     price = float(s4.close[ei])
-            qty = pos['quantity']
-            pnl = S.calc_pnl(pos, price, FEE)
-            ps['liquid_capital'] += (price * qty) * (1 - FEE)
-            trade = {
-                **pos, 'exit_reason': reason, 'exit_price': price,
-                'exit_time': t_ms / 1000.0, **pnl,
-                'duration_hours': (t_ms / 1000.0 - pos['entry_time']) / 3600,
-                'peak_price': pos['peak'],
-                'peak_pct': ((pos['peak'] - pos['entry_price']) / pos['entry_price']) * 100,
-                'smart_tp_activated': pos.get('smart_tp_mode', False),
-                'smart_tp_peak': pos.get('smart_tp_peak', pos['entry_price']),
-                'platform': PLATFORM,
-            }
+            trade = self._close(pos, price, reason, t_ms / 1000.0)
             ps['history'].append(trade)
             del ps['open_positions'][sym]
 

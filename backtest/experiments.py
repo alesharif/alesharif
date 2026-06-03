@@ -126,6 +126,25 @@ EXPERIMENTS = {
                regime={'mode': 'stable', 'threshold': 1.15},
                quality={'atr_min': 0.05, 'adx_min': 40.0},
                entry={'mode': 'breakout_rs', 'lookback': 20, 'mom': 10, 'rs': 30, 'rs_margin': 0.10}),
+
+    # ── Long/Short: شراء القوة + بيع الضعف (مرآة G4) ──
+    # ملاحظة: الشورت محاكاة (يتطلب عقوداً/هامش فعلياً). بلا فلتر خوف حاجب
+    # (الشورت يتكفّل بالهبوط)، مع جودة ATR/ADX + SL-2.5% + EarlyExit.
+    'H1': dict(desc='Long/Short متماثل (اختراق↑ + كسر↓) + RS + جودة',
+               overrides={'STOP_LOSS_PCT': -0.025, 'EARLY_EXIT_ENABLED': True},
+               regime=None, quality={'atr_min': 0.05, 'adx_min': 40.0},
+               entry={'mode': 'breakout_rs', 'lookback': 20, 'mom': 10, 'rs': 30},
+               ls={'mode': 'symmetric'}),
+    'H2': dict(desc='Long/Short تبديل بالنظام (long هدوء / short خوف)',
+               overrides={'STOP_LOSS_PCT': -0.025, 'EARLY_EXIT_ENABLED': True},
+               regime=None, quality={'atr_min': 0.05, 'adx_min': 40.0},
+               entry={'mode': 'breakout_rs', 'lookback': 20, 'mom': 10, 'rs': 30},
+               ls={'mode': 'regime', 'threshold': 1.15}),
+    'H3': dict(desc='Long/Short متماثل + قوة نسبية أشدّ (±5% مقابل BTC)',
+               overrides={'STOP_LOSS_PCT': -0.025, 'EARLY_EXIT_ENABLED': True},
+               regime=None, quality={'atr_min': 0.05, 'adx_min': 40.0},
+               entry={'mode': 'breakout_rs', 'lookback': 20, 'mom': 10, 'rs': 30, 'rs_margin': 0.05},
+               ls={'mode': 'symmetric'}),
 }
 
 # أزواج العملات المستقرة (DAIUSDT غير متوفر على المرآة — يُتخطى تلقائياً)
@@ -279,6 +298,13 @@ def run_one(exp_id, capital=5000.0, year=2025, workers=4):
         bt.breakout_mom = en.get('mom', 10)
         bt.rs_lookback = en.get('rs', 30)
         bt.rs_margin = en.get('rs_margin', 0.0)
+    ls = cfg.get('ls')
+    if ls:
+        bt.allow_short = True
+        bt.short_mode = ls['mode']
+        if ls['mode'] == 'regime':
+            bt.stable_times, bt.stable_ratio = build_stable_ratio_map(year)
+            bt.stable_threshold = ls.get('threshold', 1.15)
     bt.preload_4h(workers=workers)
     bt.preload_daily(workers=workers)
     bt.run()
