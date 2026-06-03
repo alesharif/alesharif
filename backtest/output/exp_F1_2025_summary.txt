@@ -1,0 +1,3 @@
+[F1] Quality + ATR exit (sl×1.5, trail×2.5)
+  overrides={} regime=None
+  العائد=-61.6%  | نهائي=$1,922  | صفقات=88  | WR=27.3%  | PF=0.74  | maxDD=-74.3%  | (1.5د)

@@ -1,0 +1,3 @@
+[F4] Quality + ATR exit (sl×1.5, trail×2.5) + dead-cut 48h
+  overrides={} regime=None
+  العائد=-54.2%  | نهائي=$2,291  | صفقات=88  | WR=27.3%  | PF=0.76  | maxDD=-69.4%  | (1.5د)
