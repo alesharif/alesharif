@@ -1,0 +1,3 @@
+[H2] Long/Short تبديل بالنظام (long هدوء / short خوف)
+  overrides={'STOP_LOSS_PCT': -0.025, 'EARLY_EXIT_ENABLED': True} regime=None
+  العائد=-7.0%  | نهائي=$4,648  | صفقات=322  | WR=48.4%  | PF=0.96  | maxDD=-19.7%  | (0.7د)

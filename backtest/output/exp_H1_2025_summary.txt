@@ -1,0 +1,3 @@
+[H1] Long/Short متماثل (اختراق↑ + كسر↓) + RS + جودة
+  overrides={'STOP_LOSS_PCT': -0.025, 'EARLY_EXIT_ENABLED': True} regime=None
+  العائد=-30.0%  | نهائي=$3,500  | صفقات=485  | WR=46.2%  | PF=0.88  | maxDD=-35.7%  | (3.2د)
