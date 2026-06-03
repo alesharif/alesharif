@@ -97,6 +97,24 @@ EXPERIMENTS = {
                overrides={}, regime=None,
                quality={'atr_min': 0.05, 'adx_min': 40.0},
                atr_exit={'sl': 1.5, 'trail': 2.5, 'dead_h': 48}),
+
+    # ── إشارة دخول جديدة: زخم/اختراق (بدل divergence المرتد) ──
+    'G1': dict(desc='اختراق Donchian20 (وحده، بدل divergence)',
+               overrides={}, regime=None,
+               entry={'mode': 'breakout', 'lookback': 20, 'mom': 10}),
+    'G2': dict(desc='اختراق + فلتر جودة ATR/ADX(5%/40)',
+               overrides={}, regime=None,
+               quality={'atr_min': 0.05, 'adx_min': 40.0},
+               entry={'mode': 'breakout', 'lookback': 20, 'mom': 10}),
+    'G3': dict(desc='اختراق + قوة نسبية مقابل BTC + جودة ATR/ADX',
+               overrides={}, regime=None,
+               quality={'atr_min': 0.05, 'adx_min': 40.0},
+               entry={'mode': 'breakout_rs', 'lookback': 20, 'mom': 10, 'rs': 30}),
+    'G4': dict(desc='اختراق+RS+جودة + فلتر الخوف + SL-2.5% + EarlyExit (كامل)',
+               overrides={'STOP_LOSS_PCT': -0.025, 'EARLY_EXIT_ENABLED': True},
+               regime={'mode': 'stable', 'threshold': 1.15},
+               quality={'atr_min': 0.05, 'adx_min': 40.0},
+               entry={'mode': 'breakout_rs', 'lookback': 20, 'mom': 10, 'rs': 30}),
 }
 
 # أزواج العملات المستقرة (DAIUSDT غير متوفر على المرآة — يُتخطى تلقائياً)
@@ -243,6 +261,12 @@ def run_one(exp_id, capital=5000.0, year=2025, workers=4):
         bt.atr_sl_mult = ax['sl']
         bt.atr_trail_mult = ax['trail']
         bt.atr_dead_h = ax.get('dead_h')
+    en = cfg.get('entry')
+    if en:
+        bt.entry_mode = en['mode']
+        bt.breakout_lookback = en.get('lookback', 20)
+        bt.breakout_mom = en.get('mom', 10)
+        bt.rs_lookback = en.get('rs', 30)
     bt.preload_4h(workers=workers)
     bt.preload_daily(workers=workers)
     bt.run()

@@ -197,6 +197,28 @@ def fast_signal(s4: Symbol4H, end_idx: int):
     }
 
 
+def breakout_signal(s4: Symbol4H, ei: int, lookback=20, mom_lookback=10):
+    """
+    إشارة زخم/اختراق (بديل الـ divergence — تشتري القوة لا الهبوط):
+      • اختراق Donchian: إغلاق الشمعة ei ≥ أعلى high في آخر `lookback` شمعة (قبلها).
+      • تأكيد زخم: العائد على آخر `mom_lookback` شمعة موجب.
+    سببي تماماً (يستخدم شموع مغلقة فقط). يعيد dict بنفس مفاتيح fast_signal.
+    """
+    out = {'has_signal': False, 'bullish_macd': False, 'bullish_rsi': False,
+           'bullish_obv': False, 'breakout': False, 'mom': 0.0,
+           'price': float(s4.close[ei]), 'volume_24h': 0.0}
+    if ei < lookback + 1 or ei < mom_lookback + 1:
+        return out
+    close_ei = float(s4.close[ei])
+    prior_high = float(s4.high[ei - lookback:ei].max())  # أعلى قمة في الشموع السابقة
+    mom = close_ei / float(s4.close[ei - mom_lookback]) - 1.0
+    is_breakout = close_ei >= prior_high and mom > 0
+    out['breakout'] = bool(is_breakout)
+    out['has_signal'] = bool(is_breakout)
+    out['mom'] = float(mom)
+    return out
+
+
 # ═══════════════════════════════════════════════════════════════════
 # المحرك
 # ═══════════════════════════════════════════════════════════════════
@@ -255,6 +277,11 @@ class Backtester:
         self.atr_sl_mult = 1.5
         self.atr_trail_mult = 2.5
         self.atr_dead_h = None
+        # إشارة الدخول: 'divergence' (الأصلية) | 'breakout' | 'breakout_rs'
+        self.entry_mode = 'divergence'
+        self.breakout_lookback = 20
+        self.breakout_mom = 10
+        self.rs_lookback = 30          # شموع 4h لحساب القوة النسبية مقابل BTC
 
     # ─── log ───
     def _log(self, msg):
@@ -401,6 +428,14 @@ class Backtester:
         open_count = len(open_symbols)
         now_sec = t_ms / 1000.0
         candidates = []
+        # القوة النسبية مقابل BTC: عائد BTC على آخر rs_lookback شمعة (سببي)
+        btc_ret = None
+        if self.entry_mode == 'breakout_rs':
+            btc4 = self.data4h.get('BTCUSDT')
+            if btc4 is not None:
+                bei = self._4h_closed_idx(btc4, t_ms)
+                if bei >= self.rs_lookback:
+                    btc_ret = float(btc4.close[bei]) / float(btc4.close[bei - self.rs_lookback]) - 1.0
         for sym in self.universe:
             if sym in open_symbols:
                 continue
@@ -420,15 +455,28 @@ class Backtester:
                 vol_24h = float(s4.quote_volume[:ei].sum())
             if vol_24h < S.MIN_VOLUME_BINANCE:
                 continue
-            sig = fast_signal(s4, ei)
-            if not sig['has_signal']:
-                continue
-            # OBV filter (#47)
-            _obv, _macd, _rsi = sig['bullish_obv'], sig['bullish_macd'], sig['bullish_rsi']
-            if _obv and _macd:
-                continue
-            if _obv and not _macd and not _rsi:
-                continue
+            # ─── إشارة الدخول (حسب entry_mode) ───
+            if self.entry_mode == 'divergence':
+                sig = fast_signal(s4, ei)
+                if not sig['has_signal']:
+                    continue
+                # OBV filter (#47) — خاص بالـ divergence
+                _obv, _macd, _rsi = sig['bullish_obv'], sig['bullish_macd'], sig['bullish_rsi']
+                if _obv and _macd:
+                    continue
+                if _obv and not _macd and not _rsi:
+                    continue
+            else:  # 'breakout' أو 'breakout_rs'
+                sig = breakout_signal(s4, ei, self.breakout_lookback, self.breakout_mom)
+                if not sig['has_signal']:
+                    continue
+                if self.entry_mode == 'breakout_rs':
+                    # قوة نسبية: العملة تتفوّق على BTC على نفس الفترة
+                    if ei < self.rs_lookback or btc_ret is None:
+                        continue
+                    coin_ret = float(s4.close[ei]) / float(s4.close[ei - self.rs_lookback]) - 1.0
+                    if coin_ret <= btc_ret:
+                        continue
             current_price = sig['price']
             # فلتر جودة الدخول (ATR/ADX) — معطّل افتراضياً
             if self.quality_filter:
