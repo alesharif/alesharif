@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Trade-distribution report for our strategy (4h + atr>=5%+adx>=40 + EMA60_20).
+"""RAW trade-potential report (NO exit) for our strategy's entries.
 
-Per-month trade count, and how many WINNERS reach >=3/5/7/9/10/12/15/20/25/30%,
-and how many LOSERS reach <=-3/.../-30%. Realistic net (EMA60_20 exit on 1m).
-6 months. Run:  python experiments/trade_distribution.py
+For each entry (4h signal + atr>=5%+adx>=40 + fear gate), over the next 48h on
+1m data, we measure the RAW excursion regardless of any exit:
+  MFE = max(high)/entry - 1   (how high it goes = upside potential)
+  MAE = min(low)/entry  - 1   (how low it goes  = downside risk)
+Then: how many trades' PEAK reaches >= +3/5/7/9/10/12/15/20/25/30%, and how many
+trades' TROUGH reaches <= -3/.../-30%. 6 months. This shows the ceiling the exit
+is trying to capture. Run:  python experiments/trade_distribution.py
 """
 
 from __future__ import annotations
@@ -102,30 +106,30 @@ def main():
                 d = HR.load_range(sym, "1m", t + 1, t + HOLD_H * 3600 * 1000)
                 if d is None or len(d) < 60:
                     continue
-                tmin = d["time"].to_numpy(); hi = d["high"].to_numpy(float)
-                lo = d["low"].to_numpy(float); cl = d["close"].to_numpy(float)
-                permonth[mname].append(exit_ema60(tmin, hi, lo, cl, price, atr))
+                hi = d["high"].to_numpy(float); lo = d["low"].to_numpy(float)
+                mfe = (hi.max() / price - 1) * 100
+                mae = (lo.min() / price - 1) * 100
+                permonth[mname].append((mfe, mae))
         print(f"  {mname}: {len(permonth[mname])} trades", flush=True)
         del ps, raw; gc.collect()
 
-    alln = np.array([x for m in MONTHS for x in permonth[m]])
-    nmonths = len(MONTHS)
-    wins = alln[alln > 0]; losses = alln[alln <= 0]
-    print(f"\n##### TRADE DISTRIBUTION ({len(alln)} trades, {nmonths} months) #####")
-    print(f"total trades: {len(alln)}  |  per-month avg: {len(alln)/nmonths:.0f}")
-    print(f"winners: {len(wins)} ({len(wins)/len(alln)*100:.0f}%)   losers: {len(losses)} ({len(losses)/len(alln)*100:.0f}%)")
-    print(f"avg win: {wins.mean():+.1f}%   avg loss: {losses.mean():+.1f}%   "
-          f"PF: {wins.sum()/-losses.sum():.2f}")
-    print(f"\n{'WINNERS >= X%':<16}{'count':>7}{'/month':>8}{'% of all':>9}")
-    print("-" * 41)
+    rows = [x for m in MONTHS for x in permonth[m]]
+    mfe = np.array([r[0] for r in rows]); mae = np.array([r[1] for r in rows])
+    n = len(rows); nmonths = len(MONTHS)
+    print(f"\n##### RAW TRADE POTENTIAL — NO EXIT ({n} trades, {nmonths} months, 48h window) #####")
+    print(f"total trades: {n}  |  per-month avg: {n/nmonths:.0f}")
+    print(f"mean PEAK (MFE): {mfe.mean():+.1f}%   median: {np.median(mfe):+.1f}%")
+    print(f"mean TROUGH (MAE): {mae.mean():+.1f}%   median: {np.median(mae):+.1f}%")
+    print(f"\n{'PEAK reaches >= X%':<20}{'count':>7}{'/month':>8}{'% of trades':>12}")
+    print("-" * 48)
     for b in WIN_BK:
-        c = int((wins >= b).sum())
-        print(f"{('win >= +'+str(b)+'%'):<16}{c:>7}{c/nmonths:>8.1f}{c/len(alln)*100:>8.0f}%")
-    print(f"\n{'LOSERS <= -X%':<16}{'count':>7}{'/month':>8}{'% of all':>9}")
-    print("-" * 41)
+        c = int((mfe >= b).sum())
+        print(f"{('peak >= +'+str(b)+'%'):<20}{c:>7}{c/nmonths:>8.1f}{c/n*100:>11.0f}%")
+    print(f"\n{'TROUGH reaches <= -X%':<20}{'count':>7}{'/month':>8}{'% of trades':>12}")
+    print("-" * 48)
     for b in LOSS_BK:
-        c = int((losses <= -b).sum())
-        print(f"{('loss <= -'+str(b)+'%'):<16}{c:>7}{c/nmonths:>8.1f}{c/len(alln)*100:>8.0f}%")
+        c = int((mae <= -b).sum())
+        print(f"{('trough <= -'+str(b)+'%'):<20}{c:>7}{c/nmonths:>8.1f}{c/n*100:>11.0f}%")
     print(f"\nper-month trade counts: " + " ".join(f"{m[2:]}:{len(permonth[m])}" for m in MONTHS))
     print("\nDONE_DIST.", flush=True)
 
