@@ -78,6 +78,25 @@ EXPERIMENTS = {
                 overrides={'TP_THRESHOLD': 0.06, 'TRAILING_RATIO': 0.985,
                            'TRAILING_ACTIVATE_PCT': 0.02}, regime=None,
                 quality={'atr_min': 0.05, 'adx_min': 40.0}),
+
+    # ── خروج ديناميكي مرتبط بالـ ATR (Chandelier) فوق فلتر الجودة ──
+    # الهدف: التقاط الانفجارات الكبيرة بدل الخروج عند +2.4%
+    'F1': dict(desc='Quality + ATR exit (sl×1.5, trail×2.5)',
+               overrides={}, regime=None,
+               quality={'atr_min': 0.05, 'adx_min': 40.0},
+               atr_exit={'sl': 1.5, 'trail': 2.5, 'dead_h': None}),
+    'F2': dict(desc='Quality + ATR exit (sl×2.0, trail×3.0) أوسع',
+               overrides={}, regime=None,
+               quality={'atr_min': 0.05, 'adx_min': 40.0},
+               atr_exit={'sl': 2.0, 'trail': 3.0, 'dead_h': None}),
+    'F3': dict(desc='Quality + ATR exit (sl×1.5, trail×2.0) أضيق trail',
+               overrides={}, regime=None,
+               quality={'atr_min': 0.05, 'adx_min': 40.0},
+               atr_exit={'sl': 1.5, 'trail': 2.0, 'dead_h': None}),
+    'F4': dict(desc='Quality + ATR exit (sl×1.5, trail×2.5) + dead-cut 48h',
+               overrides={}, regime=None,
+               quality={'atr_min': 0.05, 'adx_min': 40.0},
+               atr_exit={'sl': 1.5, 'trail': 2.5, 'dead_h': 48}),
 }
 
 # أزواج العملات المستقرة (DAIUSDT غير متوفر على المرآة — يُتخطى تلقائياً)
@@ -218,6 +237,12 @@ def run_one(exp_id, capital=5000.0, year=2025, workers=4):
         bt.quality_filter = True
         bt.atr_ratio_min = q['atr_min']
         bt.adx_min = q['adx_min']
+    ax = cfg.get('atr_exit')
+    if ax:
+        bt.atr_exit = True
+        bt.atr_sl_mult = ax['sl']
+        bt.atr_trail_mult = ax['trail']
+        bt.atr_dead_h = ax.get('dead_h')
     bt.preload_4h(workers=workers)
     bt.preload_daily(workers=workers)
     bt.run()

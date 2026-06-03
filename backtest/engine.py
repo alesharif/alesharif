@@ -68,6 +68,40 @@ def _adx_series(high, low, close, period=14):
     return pd.Series(np.nan_to_num(dx)).ewm(alpha=1 / period, adjust=False).mean().to_numpy()
 
 
+def check_exit_atr(pos, current_price, now_ts, atr_price, sl_mult, trail_mult,
+                   candle=None, dead_h=None, max_hold_days=30):
+    """
+    خروج ديناميكي مرتبط بالـ ATR (Chandelier) — لالتقاط الانفجارات الكبيرة.
+      • الوقف الابتدائي = entry - sl_mult * ATR
+      • بعد ارتفاع السعر: الوقف = peak - trail_mult * ATR (يتبع القمة)
+      • لا خروج زمني عند 24h (يقتل المنفجرات) — فقط max_hold + dead-cut اختياري.
+    atr_price: ATR بوحدة السعر وقت الدخول (atr_ratio*entry). يستخدم low/high الشمعة.
+    """
+    now = now_ts
+    entry = pos['entry_price']
+    check_high = candle['high'] if (candle and 'high' in candle) else current_price
+    check_low = candle['low'] if (candle and 'low' in candle) else current_price
+    if check_high > pos['peak']:
+        pos['peak'] = check_high
+    # الوقف: الأعلى بين الابتدائي والمتحرك من القمة
+    init_stop = entry - sl_mult * atr_price
+    trail_stop = pos['peak'] - trail_mult * atr_price
+    eff_stop = max(init_stop, trail_stop)
+    if check_low <= eff_stop:
+        reason = 'ATR_TRAIL' if pos['peak'] > entry + 1e-12 and trail_stop >= init_stop else 'ATR_STOP'
+        # سعر الخروج = الوقف (أو low لو فجوة تحته)
+        exit_price = eff_stop if check_low <= eff_stop else check_low
+        return {'exit_reason': reason, 'exit_price': min(eff_stop, check_high if check_high > 0 else eff_stop),
+                'exit_time': now}
+    dur_h = (now - pos['entry_time']) / 3600
+    # dead-cut اختياري: لم يرتفع فوق entry+0.5*ATR خلال dead_h ساعة
+    if dead_h is not None and dur_h >= dead_h and pos['peak'] < entry + 0.5 * atr_price:
+        return {'exit_reason': 'ATR_DEAD', 'exit_price': current_price, 'exit_time': now}
+    if dur_h >= max_hold_days * 24:
+        return {'exit_reason': 'TIME_LIMIT', 'exit_price': current_price, 'exit_time': now}
+    return None
+
+
 class Symbol4H:
     """شموع 4h لعملة مع مؤشرات MACD/RSI/OBV/ATR/ADX محسوبة مسبقاً على كامل السلسلة."""
     __slots__ = ('symbol', 'open_time', 'close_time', 'open', 'high', 'low',
@@ -216,6 +250,11 @@ class Backtester:
         self.quality_filter = False
         self.atr_ratio_min = 0.05
         self.adx_min = 40.0
+        # خروج ديناميكي مرتبط بالـ ATR — معطّل افتراضياً
+        self.atr_exit = False
+        self.atr_sl_mult = 1.5
+        self.atr_trail_mult = 2.5
+        self.atr_dead_h = None
 
     # ─── log ───
     def _log(self, msg):
@@ -449,6 +488,7 @@ class Backtester:
                 'symbol': sym, 'price': current_price, 'daily_volume': vol_24h,
                 'sigma': sigma, 'signals': sig, 'volatility_96h': volatility_96h,
                 'strategy_used': ['v3'], 'v4_signal': None,
+                'atr_ratio': float(s4.atr_ratio[ei]),
             })
         # ترتيب composite (مطابق نهاية search_signals)
         rank_candidates(candidates, self.verbose)
@@ -489,6 +529,10 @@ class Backtester:
                 'smart_tp_mode': False, 'smart_tp_peak': entry_price,
                 'strategy_used': ['v3'],
             }
+            # ATR بوحدة السعر وقت الدخول (للخروج الديناميكي)
+            ar = cand.get('atr_ratio', np.nan)
+            pos['atr_price'] = (ar * entry_price) if (ar and np.isfinite(ar) and ar > 0) \
+                else abs(S.STOP_LOSS_PCT) / max(self.atr_sl_mult, 1e-9) * entry_price
             ps['open_positions'][cand['symbol']] = pos
 
     # ═══════════════════════════════════════════════════════════════
@@ -506,7 +550,13 @@ class Backtester:
             if candle is None:
                 continue
             now_sec = candle['close_time'] / 1000.0
-            res = S.check_exit(pos, candle['close'], now_sec, candle=candle)
+            if self.atr_exit:
+                res = check_exit_atr(pos, candle['close'], now_sec,
+                                     pos.get('atr_price', abs(S.STOP_LOSS_PCT) * pos['entry_price']),
+                                     self.atr_sl_mult, self.atr_trail_mult,
+                                     candle=candle, dead_h=self.atr_dead_h)
+            else:
+                res = S.check_exit(pos, candle['close'], now_sec, candle=candle)
             if not res:
                 continue
             exit_price = res['exit_price']
