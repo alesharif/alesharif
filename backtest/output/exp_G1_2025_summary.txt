@@ -1,0 +1,3 @@
+[G1] اختراق Donchian20 (وحده، بدل divergence)
+  overrides={} regime=None
+  العائد=-66.9%  | نهائي=$1,655  | صفقات=1655  | WR=53.2%  | PF=0.86  | maxDD=-70.0%  | (8.6د)
