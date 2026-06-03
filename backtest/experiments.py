@@ -14,6 +14,7 @@ import time
 import csv
 
 import numpy as np
+import pandas as pd
 
 from . import strategy_core as S
 from . import engine as E
@@ -50,14 +51,70 @@ EXPERIMENTS = {
     'E6': dict(desc='دمج: بوابة BTC + التقاط ربح أفضل (E3)',
                overrides={'TP_THRESHOLD': 0.06, 'TRAILING_RATIO': 0.985,
                           'TRAILING_ACTIVATE_PCT': 0.02}, regime='ema50'),
+
+    # ── فلتر "مقياس الخوف" عبر حجم العملات المستقرة (بديل عملي لفلتر BTC) ──
+    'E7': dict(desc='Stable-Ratio Fear Filter @1.15 (وحده)',
+               overrides={}, regime={'mode': 'stable', 'threshold': 1.15}),
+    'E8': dict(desc='Stable-Ratio Fear @1.10 (أكثر حساسية)',
+               overrides={}, regime={'mode': 'stable', 'threshold': 1.10}),
+    'E9': dict(desc='Stable-Ratio Fear @1.30 (محافظ)',
+               overrides={}, regime={'mode': 'stable', 'threshold': 1.30}),
+    'E10': dict(desc='Stable-Ratio @1.15 + SL-2.5% + Early Exit',
+                overrides={'STOP_LOSS_PCT': -0.025, 'EARLY_EXIT_ENABLED': True},
+                regime={'mode': 'stable', 'threshold': 1.15}),
 }
+
+# أزواج العملات المستقرة (DAIUSDT غير متوفر على المرآة — يُتخطى تلقائياً)
+STABLE_PAIRS = ['USDCUSDT', 'FDUSDUSDT', 'TUSDUSDT', 'DAIUSDT']
+STABLE_LOOKBACK = 30
+
+
+def build_stable_ratio_map(year):
+    """
+    يبني نسبة الخوف لكل شمعة 4h: vol(آخر شمعة مكتملة) / متوسط آخر 30 (سببي shift(1)).
+    صفر نظر مستقبلي. يُرجع (open_times_sorted: np.int64[], ratios: float[]).
+    البوابة تستخدم open_time للبحث عن آخر شمعة مكتملة قبل t_ms.
+    """
+    from datetime import datetime, timezone
+    from . import data
+    s = datetime(year - 1, 11, 1, tzinfo=timezone.utc)
+    e = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+    vol = {}
+    for p in STABLE_PAIRS:
+        df = data.get_klines_df(p, '4h', s, e)
+        if df is None or df.empty:
+            continue
+        for ot, qv in zip(df['open_time'], df['quote_volume']):
+            vol[int(ot)] = vol.get(int(ot), 0.0) + float(qv)
+    if len(vol) < STABLE_LOOKBACK + 2:
+        return np.array([], dtype=np.int64), np.array([], dtype=float)
+    items = sorted(vol.items())
+    times = np.array([t for t, _ in items], dtype=np.int64)
+    vols = np.array([v for _, v in items], dtype=float)
+    avg = pd.Series(vols).rolling(STABLE_LOOKBACK).mean().shift(1).to_numpy()
+    ratio = np.where((np.isfinite(avg)) & (avg > 0), vols / avg, np.nan)
+    return times, ratio
 
 
 class RegimeBacktester(Backtester):
-    """نفس المحرك + بوابة نظام السوق (BTC trend) قبل أي scan."""
-    regime_mode = None
+    """نفس المحرك + بوابة نظام السوق (BTC trend أو Stable-Ratio Fear) قبل أي scan."""
+    regime_mode = None          # 'ema50' | 'ema99' | 'stable'
+    stable_threshold = 1.15
+    stable_times = None         # np.int64[]  open_times
+    stable_ratio = None         # float[]
 
     def _regime_ok(self, t_ms):
+        if self.regime_mode == 'stable':
+            if self.stable_times is None or len(self.stable_times) == 0:
+                return True
+            idx = int(np.searchsorted(self.stable_times, t_ms, side='left')) - 1
+            if idx < 0:
+                return True  # لا بيانات بعد → اسمح
+            r = self.stable_ratio[idx]
+            if not np.isfinite(r):
+                return True  # فشل/نقص → لا تمنع (مطابق fetch_stable_ratio)
+            return bool(r <= self.stable_threshold)  # خوف (r>عتبة) → امنع
+        # بوابات BTC
         sd = self.get_daily('BTCUSDT')
         if sd is None:
             return True
@@ -130,10 +187,16 @@ def run_one(exp_id, capital=5000.0, year=2025, workers=4):
         setattr(S, k, v)
 
     t0 = time.time()
-    cls = RegimeBacktester if cfg['regime'] else Backtester
+    regime = cfg['regime']
+    cls = RegimeBacktester if regime else Backtester
     bt = cls(start_capital=capital, year=year, verbose=False)
-    if cfg['regime']:
-        bt.regime_mode = cfg['regime']
+    if regime:
+        if isinstance(regime, dict) and regime.get('mode') == 'stable':
+            bt.regime_mode = 'stable'
+            bt.stable_threshold = regime.get('threshold', 1.15)
+            bt.stable_times, bt.stable_ratio = build_stable_ratio_map(year)
+        else:
+            bt.regime_mode = regime  # 'ema50' / 'ema99'
     bt.preload_4h(workers=workers)
     bt.preload_daily(workers=workers)
     bt.run()
