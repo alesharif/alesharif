@@ -1,0 +1,3 @@
+[E5] دمج: بوابة BTC + SL -2.5% + Early Exit
+  overrides={'STOP_LOSS_PCT': -0.025, 'EARLY_EXIT_ENABLED': True} regime=ema50
+  العائد=-56.9%  | نهائي=$2,155  | صفقات=1058  | WR=44.7%  | PF=0.78  | maxDD=-60.3%  | (1.2د)

@@ -1,0 +1,3 @@
+[E6] دمج: بوابة BTC + التقاط ربح أفضل (E3)
+  overrides={'TP_THRESHOLD': 0.06, 'TRAILING_RATIO': 0.985, 'TRAILING_ACTIVATE_PCT': 0.02} regime=ema50
+  العائد=-66.4%  | نهائي=$1,680  | صفقات=911  | WR=63.6%  | PF=0.68  | maxDD=-67.1%  | (1.2د)

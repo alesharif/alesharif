@@ -1,0 +1,3 @@
+[E2] تفعيل Early Exit (6h / peak<2.5%)
+  overrides={'EARLY_EXIT_ENABLED': True} regime=None
+  العائد=-77.4%  | نهائي=$1,129  | صفقات=1368  | WR=48.5%  | PF=0.75  | maxDD=-79.8%  | (3.0د)
