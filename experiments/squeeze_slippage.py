@@ -18,12 +18,14 @@ import pandas as pd
 sys.path.insert(0, ".")
 from binance_sim import pit_universe as PIT               # noqa: E402
 
-START = "2022-06-01"; END = "2026-06-01"
-if "2024" in sys.argv:                        # gold-standard OOS regime
-    START = "2023-06-01"; END = "2025-01-01"
+START = "2022-06-01"; END = "2026-06-01"; _sigfrom = START
+if "2024" in sys.argv:                         # gold-standard OOS: strong-bull year
+    START = "2023-06-01"; END = "2025-01-01"; _sigfrom = "2024-01-01"
+elif "bear" in sys.argv:                       # the brutal 2022-2023 alt bear
+    START = "2022-06-01"; END = "2023-12-01"; _sigfrom = "2022-10-01"
 DS = int(pd.Timestamp(START, tz="UTC").timestamp()*1000)
 DE = int(pd.Timestamp(END, tz="UTC").timestamp()*1000)
-SIG_FROM = int(pd.Timestamp("2024-01-01", tz="UTC").timestamp()*1000) if "2024" in sys.argv else DS
+SIG_FROM = int(pd.Timestamp(_sigfrom, tz="UTC").timestamp()*1000)
 SL = 0.10; WINDOW_MS = 90*24*3600*1000
 TPS = [0.10, 0.50]
 COSTS = [0.2, 0.5, 1.0, 1.5, 2.0]        # round-trip % (spread+slippage+fee)
