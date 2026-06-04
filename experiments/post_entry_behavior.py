@@ -56,25 +56,28 @@ def main():
             if np.nanmean(dv[max(0, i-30):i]) <= LIQ_MIN:
                 continue
             ent = c[i]; tp_px = ent*(1+TP); sl_px = ent*(1-SL)
-            minlow = ent; up5 = dn5 = None; outcome = None; fin = ent
+            up5 = dn5 = None; outcome = None; exit_j = min(i+90, n-1)
             for j in range(i+1, min(i+91, n)):
-                if l[j] < minlow:
-                    minlow = l[j]
                 if up5 is None and h[j] >= ent*1.05:
                     up5 = j
                 if dn5 is None and l[j] <= ent*0.95:
                     dn5 = j
                 if l[j] <= sl_px:
-                    outcome = "stop"; fin = sl_px; break
+                    outcome = "stop"; exit_j = j; break
                 if h[j] >= tp_px:
-                    outcome = "tp"; fin = tp_px; break
-                fin = c[j]
+                    outcome = "tp"; exit_j = j; break
             if outcome is None:
                 outcome = "timeout"
-            up_first = (up5 is not None) and (dn5 is None or up5 <= dn5)
+            hs = h[i+1:exit_j+1]; ls = l[i+1:exit_j+1]
+            if len(ls) == 0:
+                continue
+            minlow = ls.min(); minpos = int(ls.argmin())
+            rise_from_bottom = (hs[minpos:].max()/minlow - 1) if minlow > 0 else 0.0
             mae = minlow/ent - 1
+            fin = (sl_px if outcome == "stop" else tp_px if outcome == "tp" else c[exit_j])
+            up_first = (up5 is not None) and (dn5 is None or up5 <= dn5)
             won = (outcome == "tp") or (outcome == "timeout" and fin > ent)
-            rows.append((up_first, mae, won, outcome))
+            rows.append((up_first, mae, won, outcome, rise_from_bottom))
         df.drop(columns=["dt"], inplace=True, errors="ignore")
     del raw; gc.collect()
 
@@ -103,6 +106,18 @@ def main():
     if won:
         wd = sum(1 for r in won if not r[0])/len(won)*100
         print(f"\n##### بين الرابحات: كم نزلت أولاً قبل أن تربح؟ {wd:.0f}% #####")
+
+    print("\n##### الصعود من القاع الجديد (بعد النزول) #####")
+    # for trades that dipped at least -5%
+    dippers = [r for r in rows if r[1] <= -0.05]
+    rfb = np.array([r[4] for r in dippers])*100
+    print(f"  (للصفقات التي نزلت ≥ −5%، عددها {len(dippers)})")
+    for lo, hi, lab in [(0, 5, "ارتداد ضعيف (0-5%)"), (5, 15, "5-15%"),
+                        (15, 30, "15-30%"), (30, 50, "30-50%"), (50, 1e9, "أكثر من 50%")]:
+        share = ((rfb > lo) & (rfb <= hi)).mean()*100 if len(rfb) else 0
+        print(f"  {lab:<20} {share:>4.0f}%")
+    if len(rfb):
+        print(f"  متوسّط الارتداد من القاع: {rfb.mean():+.1f}%   |   الوسيط: {np.median(rfb):+.1f}%")
     print("\nDONE_BEHAV.", flush=True)
 
 
