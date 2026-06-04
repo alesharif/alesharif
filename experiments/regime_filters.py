@@ -44,7 +44,7 @@ def regime_series(close_series, rule, bullish_when_above):
     else:
         risk = c.values < e
     # period_end time = last index timestamp of each period (ms)
-    pend = (c.index.view("int64") // 10**6).to_numpy()
+    pend = np.asarray(c.index.astype("int64")) // 10**6
     return pend, risk.astype(bool)
 
 
