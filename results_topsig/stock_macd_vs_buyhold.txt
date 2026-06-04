@@ -1,0 +1,26 @@
+MACD+200EMA on STOCKS vs BUY & HOLD (daily, 15y)
+
+ticker   nTr    WR   expR   totR     B&H  verdict
+------------------------------------------------------------
+AAPL      29   69% +0.69R   +20R  +1292%   LOSES to B&H
+MSFT      36   47% +0.11R    +4R  +1269%   LOSES to B&H
+AMZN      34   62% +0.47R   +16R  +2478%   LOSES to B&H
+GOOGL     36   50% +0.20R    +7R  +2159%   LOSES to B&H
+NVDA      46   50% +0.23R   +10R +58535%   LOSES to B&H
+SPY       32   53% +0.19R    +6R   +439%   LOSES to B&H
+INTC      44   45% +0.10R    +4R   +304%   LOSES to B&H
+PFE       41   41% +0.06R    +3R    +19%   LOSES to B&H
+KO        45   40% -0.05R    -2R   +114%   LOSES to B&H
+XOM       43   51% +0.21R    +9R    +79%   LOSES to B&H
+F         39   41% -0.06R    -2R    +26%   LOSES to B&H
+T         33   36% -0.13R    -4R     -1%   LOSES to B&H
+CSCO      40   30% -0.27R   -11R   +521%   LOSES to B&H
+WBA      fetch/err: HTTP Error 404: Not Found
+BABA      26   38% -0.20R    -5R    +51%   LOSES to B&H
+------------------------------------------------------------
+ALL      524                +55R
+
+B&H = شراء واحتفاظ على نفس المدة. totR = مجموع R للاستراتيجية.
+لو totR صغير/سالب بينما B&H ضخم => الاستراتيجية تخسر أمام مجرّد الاحتفاظ.
+
+DONE_STOCKS.
