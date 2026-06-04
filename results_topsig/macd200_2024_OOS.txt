@@ -1,0 +1,14 @@
+MACD+200EMA backtest — period=2024 (2024-01-01..2025-01-01), 4h candles
+
+  universe: 408 symbols loaded; simulating...
+variant                        n      WRexp/trade    totalR
+------------------------------------------------------------
+base (swing SL)            11470     43%   +0.03R     +363R
+base + 2xATR SL            11470     41%   -0.06R     -632R
+base + skip-flat            6086     42%   -0.00R      -15R
+base+ATR + skip-flat        6086     39%   -0.12R     -714R
+
+نقطة التعادل عند 1.5:1 = WR 40%. الفيديو يدّعي ~70%.
+exp>0 => توقّع موجب. قارن WR الفعلي بالـ70% المُدّعى.
+
+DONE_MACD200.
