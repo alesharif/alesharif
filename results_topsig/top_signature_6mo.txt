@@ -1,0 +1,61 @@
+REVERSE signal-mining: what recurs at REAL tops vs mid-trend?
+
+  rules: TOP=peak then drop>=8.0% & no reclaim; HOLD=mid-trend, +3.0% more over next 6h
+
+  2025-12: 48 trades; labelling pumps...
+  2026-01: 87 trades; labelling pumps...
+  2026-02: 39 trades; labelling pumps...
+  2026-03: 50 trades; labelling pumps...
+  2026-04: 104 trades; labelling pumps...
+  2026-05: 77 trades; labelling pumps...
+
+##### TOP SIGNATURE — 185 pumps, 171 TOP candles, 3105 HOLD candles (base rate 5%) #####
+signal              recall     fpr   lift   prec
+(الإشارة)             صحيح    خاطئ      ×    دقة
+--------------------------------------------------
+vol_climax>3x          37%      6%   6.2x    25%
+ext>15%ema20           29%      8%   3.6x    16%
+rsi>78                 15%      5%   3.3x    15%
+bb_%b>1                46%     14%   3.2x    15%
+rsi>70                 37%     12%   3.1x    15%
+red_after_3green       18%      6%   3.1x    14%
+roc_decel              39%     16%   2.5x    12%
+rsi_bear_div           11%      5%   2.2x    11%
+uwick>0.5              42%     20%   2.0x    10%
+bear_engulf             7%      6%   1.1x     6%
+close<prev_low          9%     16%   0.6x     3%
+vol_div                11%     23%   0.5x     3%
+macd_hist_flip          1%      3%   0.4x     2%
+macd_hist<0            16%     46%   0.3x     2%
+lower_high              6%     22%   0.3x     1%
+close<ema9              8%     38%   0.2x     1%
+close<ema20             6%     33%   0.2x     1%
+3 lower closes          0%      8%   0.0x     0%
+
+##### BEST COMBINATIONS (AND), recall>=12% #####
+combo                                     recall    fpr   lift   prec
+bb_%b>1 + uwick>0.5 + vol_climax>3x          13%     1%  15.4x    46%
+uwick>0.5 + vol_climax>3x                    19%     1%  13.5x    43%
+bb_%b>1 + uwick>0.5                          18%     2%   7.8x    30%
+ext>15%ema20 + bb_%b>1 + vol_climax>3x       15%     2%   7.2x    28%
+rsi>70 + ext>15%ema20 + vol_climax>3x        14%     2%   7.1x    28%
+ext>15%ema20 + vol_climax>3x                 15%     2%   7.1x    28%
+bb_%b>1 + vol_climax>3x                      27%     4%   6.1x    25%
+rsi>70 + bb_%b>1 + vol_climax>3x             18%     3%   5.6x    24%
+rsi>70 + vol_climax>3x                       18%     3%   5.6x    23%
+rsi>70 + uwick>0.5                           12%     2%   5.3x    23%
+red_after_3green + roc_decel                 16%     3%   4.9x    21%
+rsi>70 + ext>15%ema20 + bb_%b>1              20%     4%   4.9x    21%
+
+##### PER-MONTH lift of top-5 singles (does it hold out-of-sample?) #####
+signal                 12     01     02     03     04     05
+vol_climax>3x        5.3x   9.3x   4.9x   5.6x   6.6x   5.2x
+ext>15%ema20         5.1x   2.8x   5.6x   3.0x   2.7x   9.5x
+rsi>78               6.3x   1.6x   3.0x   2.6x   2.9x  10.3x
+bb_%b>1              4.1x   4.1x   2.3x   2.7x   3.2x   3.1x
+rsi>70               3.6x   2.7x   3.3x   2.9x   2.4x   5.4x
+
+المفيد = recall عالٍ + fpr منخفض (lift كبير). lift~1 يعني الإشارة تظهر في الاستمرار بنفس قدر القمة → عديمة الفائدة.
+ثبات lift عبر الأشهر = إشارة حقيقية؛ تذبذبه = صدفة/إفراط بالعيّنة.
+
+DONE_TOPSIG.
