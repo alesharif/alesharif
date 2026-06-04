@@ -33,26 +33,21 @@ def ema(a, n): return pd.Series(a).ewm(span=n, adjust=False).mean().to_numpy()
 
 
 def regime_series(close_series, rule, bullish_when_above):
-    """Return (period_end_times[], risk_on[]) lagged (period must be closed)."""
-    r = close_series.resample(rule)
-    c = r.last().dropna()
+    """Return a float Series (datetime-indexed) of risk-on (1/0), lagged 1 period
+    so only completed-period info is used. asof() reads it at any entry time."""
+    c = close_series.resample(rule).last().dropna()
     if len(c) < 25:
-        return np.array([]), np.array([])
-    e = pd.Series(c.values).ewm(span=20, adjust=False).mean().to_numpy()
-    if bullish_when_above:
-        risk = c.values > e
-    else:
-        risk = c.values < e
-    # period_end time = last index timestamp of each period (ms)
-    pend = np.asarray(c.index.astype("int64")) // 10**6
-    return pend, risk.astype(bool)
+        return None
+    e = c.ewm(span=20, adjust=False).mean()
+    risk = (c > e) if bullish_when_above else (c < e)
+    return risk.astype(float).shift(1)                   # prior completed period
 
 
-def query(pend, risk, t):
-    if len(pend) == 0:
+def query(series, t):
+    if series is None:
         return False
-    idx = np.searchsorted(pend, t, side="left") - 1     # last period ended strictly before t
-    return bool(risk[idx]) if idx >= 0 else False
+    v = series.asof(pd.Timestamp(t, unit="ms"))
+    return bool(v == 1.0) if pd.notna(v) else False
 
 
 def main():
@@ -71,6 +66,10 @@ def main():
     for tfn, rule in TFS.items():
         REG[("BTC", tfn)] = regime_series(btc_close, rule, True)
         REG[("STABLE", tfn)] = regime_series(stable_close, rule, False)
+    print(f"  BTC bars={len(btc_close)}, STABLE bars={len(stable_close)}")
+    for k, s in REG.items():
+        frac = (s == 1.0).mean()*100 if s is not None else float('nan')
+        print(f"    {k}: risk-on {frac:.0f}% of periods")
 
     # ---- developed-system trades ----
     trades = []          # (entry_t, net_ret, month_key)
@@ -133,8 +132,8 @@ def main():
     report("BASE (no filter)", trades)
     for filt in ("BTC", "STABLE"):
         for tfn in TFS:
-            pend, risk = REG[(filt, tfn)]
-            sel = [x for x in trades if query(pend, risk, x[0])]
+            series = REG[(filt, tfn)]
+            sel = [x for x in trades if query(series, x[0])]
             report(f"{filt} / {tfn}", sel)
     print("\nالفائز = أعلى cons% (نسبة الأشهر الموجبة) مع حفاظ معقول على التوقّع وعدد الصفقات.")
     print("\nDONE_REGIME.", flush=True)
