@@ -25,8 +25,11 @@ sys.path.insert(0, ".")
 from binance_sim import pit_universe as PIT               # noqa: E402
 
 START = "2022-06-01"; END = "2026-06-01"
+if "2024" in sys.argv:                       # out-of-sample regime
+    START = "2023-09-01"; END = "2025-01-01"  # warmup from Sep'23, signals in 2024
 DS = int(pd.Timestamp(START, tz="UTC").timestamp()*1000)
 DE = int(pd.Timestamp(END, tz="UTC").timestamp()*1000)
+SIG_FROM = int(pd.Timestamp("2024-01-01", tz="UTC").timestamp()*1000) if "2024" in sys.argv else DS
 SL = 0.10; TP = 0.50; WINDOW_MS = 90*24*3600*1000
 RSI_N = 14; MA_FAST = 54; MA_SLOW = 81
 LOW_ZONE = 45.0          # ribbon turning up from the lower half (oversold-ish)
@@ -58,7 +61,7 @@ def wobbler_entries(d, low_zone=True):
     for i in range(MA_SLOW + 1, n):
         cross_up = (maf[i] > mas[i]) and (maf[i-1] <= mas[i-1])    # turns green (expand)
         zone_ok = (mas[i] < LOW_ZONE) if low_zone else True       # from a low zone
-        if cross_up and zone_ok and np.isfinite(mas[i]):
+        if cross_up and zone_ok and np.isfinite(mas[i]) and int(t[i]) >= SIG_FROM:
             out.append((int(t[i]), float(c[i])))
     return out
 
