@@ -1,0 +1,57 @@
+Cycle gauge = explosive breadth (% coins +50% in 30d). Predict losing months?
+
+month      win?   mean%  breadth
+2022-12     WIN  +99.0%       1%
+2023-01     WIN  +43.7%       7%
+2023-02    lose  -12.0%      27%
+2023-03    lose  -12.0%       2%
+2023-04    lose   -8.8%       3%
+2023-05    lose   -4.7%       1%
+2023-06     WIN  +13.6%       1%
+2023-07    lose   -1.5%       3%
+2023-08    lose   -1.5%       1%
+2023-09     WIN  +22.9%       2%
+2023-10     WIN  +36.6%       3%
+2023-11     WIN  +14.9%      20%
+2023-12     WIN   +0.6%      13%
+2024-01     WIN  +33.0%       7%
+2024-02     WIN  +33.5%       5%
+2024-03     WIN   +8.2%      42%
+2024-04    lose  -12.0%       5%
+2024-05    lose   -9.1%       3%
+2024-06    lose  -11.2%       3%
+2024-07    lose  -12.0%       0%
+2024-08    lose   -8.1%       1%
+2024-09     WIN   +4.0%       3%
+2024-10     WIN  +12.1%       4%
+2024-11     WIN   +6.3%      13%
+2024-12    lose  -12.0%      82%
+2025-01    lose  -12.0%       2%
+2025-02    lose  -12.0%       1%
+2025-03    lose  -12.0%       1%
+2025-04     WIN  +10.0%       1%
+2025-05    lose   -7.4%      28%
+2025-06    lose   -6.6%       1%
+2025-07     WIN   +4.3%       6%
+2025-08    lose  -12.0%       4%
+2025-09    lose  -11.0%       2%
+2025-10    lose  -12.0%       2%
+2025-11    lose   -9.2%       1%
+2025-12    lose   -3.1%       1%
+2026-01    lose  -10.5%       1%
+2026-02    lose  -12.0%       1%
+2026-03    lose   -4.8%       2%
+2026-04    lose   -0.4%       4%
+2026-05    lose   -8.4%       8%
+
+explosive-breadth  WIN months: 9%   LOSE months: 7%   gap: +1%
+monthly breadth autocorrelation (lag1): +0.18  (>0.3 => persistent/cyclical => catchable)
+
+gate                        n      exp   months+  cons%
+no gate                  2394    +8.6%    15/42     36%
+breadth>=3%              1302   +13.0%    10/26     38%
+breadth>=4%               718    +7.7%     8/20     40%
+
+إن كان gap كبيراً + autocorr>0.3 + البوّابة ترفع cons% => فكرتك صحيحة والدورة قابلة للّحاق.
+
+DONE_CYCLE.
