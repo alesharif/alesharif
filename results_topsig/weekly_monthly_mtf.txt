@@ -1,0 +1,21 @@
+MULTI-TIMEFRAME: weekly timing gated by monthly trend — vs alternatives
+
+monthly SMA10, weekly SMA20, fee 0.2%/switch. Drawdown measured weekly.
+
+### BTC-USD  (612 weeks ≈ 11.8y) ###
+strategy           CAGR    totRet   maxDD  switch  inMkt
+Buy&Hold            54%   +15773%    -83%       0   100%
+monthly only        55%   +17168%    -81%      14    66%
+weekly only         63%   +31448%    -72%      44    58%
+weekly+monthly      54%   +15513%    -75%      34    51%
+
+### ETH-USD  (448 weeks ≈ 8.6y) ###
+strategy           CAGR    totRet   maxDD  switch  inMkt
+Buy&Hold            22%     +473%    -94%       0   100%
+monthly only        12%     +158%    -88%      16    48%
+weekly only         37%    +1440%    -60%      36    48%
+weekly+monthly      27%     +701%    -58%      26    33%
+
+نبحث: هل 'أسبوعي+شهري' يخفض maxDD أكثر من الشهري وحده، مع عائد معقول؟
+
+DONE_WM.
