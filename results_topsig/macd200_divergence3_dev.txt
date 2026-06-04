@@ -1,0 +1,26 @@
+MACD+200EMA backtest — period=dev (2025-12-01..2026-06-01), 4h candles
+
+  universe: 442 symbols loaded; simulating...
+variant                        n      WRexp/trade    totalR
+------------------------------------------------------------
+base (swing SL)             7167     39%   -0.10R     -685R
+base + 2xATR SL             7167     42%   -0.09R     -615R
+base + skip-flat            3616     40%   -0.08R     -284R
+base+ATR + skip-flat        3616     40%   -0.16R     -563R
+---- + HIDDEN DIVERGENCE filter (the video's '70%' booster) ----
+base + hdiv                  507     37%   -0.14R      -71R
+base + hdiv + skip-flat      273     37%   -0.12R      -32R
+base+ATR + hdiv              507     41%   -0.12R      -60R
+base+ATR + hdiv + flat       273     37%   -0.24R      -65R
+---- + 3-CANDLE micro-divergence (user's idea: price vs RSI, last 3 bars) ----
+base + div3                  157     39%   -0.12R      -19R
+base + div3 + skip-flat       62     37%   -0.20R      -13R
+base + div3_strong             1    100%   +1.48R       +1R
+base+ATR + div3              157     42%   -0.14R      -22R
+base+ATR + div3_strong         1    100%   +1.49R       +1R
+
+الدايفرجنس المخفي مُطبّق على آخر قاعَي/قمّتَي تأرجح مؤكّدَين (fractal +-2).
+نقطة التعادل عند 1.5:1 = WR 40%. الفيديو يدّعي ~70%.
+exp>0 => توقّع موجب. قارن WR الفعلي بالـ70% المُدّعى.
+
+DONE_MACD200.
