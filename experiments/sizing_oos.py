@@ -36,6 +36,16 @@ MONTHS = {"2025-12": ("2025-12-01", "2026-01-01"), "2026-01": ("2026-01-01", "20
           "2026-02": ("2026-02-01", "2026-03-01"), "2026-03": ("2026-03-01", "2026-04-01"),
           "2026-04": ("2026-04-01", "2026-05-01"), "2026-05": ("2026-05-01", "2026-06-01")}
 
+# True out-of-sample regime: spread across 2024 (unseen). Use:  ... sizing_oos.py 2024
+if "2024" in sys.argv:
+    CACHE = "results_topsig/trades_2024.npz"
+    MONTHS = {"2024-02": ("2024-02-01", "2024-03-01"), "2024-04": ("2024-04-01", "2024-05-01"),
+              "2024-06": ("2024-06-01", "2024-07-01"), "2024-08": ("2024-08-01", "2024-09-01"),
+              "2024-10": ("2024-10-01", "2024-11-01"), "2024-12": ("2024-12-01", "2025-01-01")}
+    FOLDS_2024 = True
+else:
+    FOLDS_2024 = False
+
 
 def parse(d):
     return int(pd.Timestamp(d, tz="UTC").timestamp() * 1000)
@@ -167,8 +177,8 @@ def main():
 
     # ---- 3) two interleaved folds (each locally mean-normalized) ----
     print("\n##### 3) TWO INTERLEAVED FOLDS — is the edge in BOTH halves? #####")
-    folds = {"A(12,02,04)": ["2025-12", "2026-02", "2026-04"],
-             "B(01,03,05)": ["2026-01", "2026-03", "2026-05"]}
+    folds = {f"A({','.join(m[5:] for m in mlist[0::2])})": mlist[0::2],
+             f"B({','.join(m[5:] for m in mlist[1::2])})": mlist[1::2]}
     print(f"{'fold':<14}{'equal':>8}{'run_k8':>9}{'ext_k8':>9}")
     for fname, fms in folds.items():
         sel = np.isin(MON, fms)
