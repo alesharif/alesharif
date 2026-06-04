@@ -1,0 +1,13 @@
+Range round-trip: buy weekly-RSI oversold, SELL at weekly-RSI overbought
+
+  2202 signals (SL 15%, 180d window)
+
+ sell@RSI     FULL     2024  2025(drought)   win%
+--------------------------------------------------
+      60     -0.9%    -1.4%        -11.1%    19%
+      65     -1.0%    -4.6%        -12.8%    17%
+      70     -0.8%   -11.3%        -12.7%    15%
+
+بيع عند RSI مرتفع = الجولة الكاملة للنطاق. موجب 2025 => يصلح للأسواق العرضية.
+
+DONE_MRX.
