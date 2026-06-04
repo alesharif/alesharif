@@ -1,0 +1,33 @@
+building trades (heavy, one-time)...
+
+  2025-12 done
+  2026-01 done
+  2026-02 done
+  2026-03 done
+  2026-04 done
+  2026-05 done
+##### 1) PER-MONTH return (global mean-weight = POS_W) #####
+month       equal   run_k8   ext_k8   (Δ vs equal)
+25-12         -8%      -8%      -8%   run -0, ext +0
+26-01         +6%     +23%     +23%   run +17, ext +16
+26-02         -3%      -5%      -2%   run -3, ext +0
+26-03         +1%      +0%     +10%   run -1, ext +9
+26-04        +32%     +90%     +65%   run +59, ext +33
+26-05        -18%     -25%     -17%   run -7, ext +1
+TOTAL        +11%     +76%     +70%
+months tilt beats equal (of 6):  run_k8=2  ext_k8=6
+
+##### 2) DROP top-N contributing trades — does the edge survive? #####
+lever       drop0   drop1   drop3   drop5
+equal        +11%    -17%    -44%    -58%
+run_k8       +76%     +3%    -60%    -81%
+ext_k8       +70%    +16%    -32%    -53%
+إن انهار run/ext إلى ~equal بعد حذف 3-5 صفقات => العائد من outliers (هشّ).
+
+##### 3) TWO INTERLEAVED FOLDS — is the edge in BOTH halves? #####
+fold             equal   run_k8   ext_k8
+A(12,02,04)       +21%     +74%     +54%
+B(01,03,05)       -10%      -1%     +15%
+تفوّق في النصفين => متانة؛ تفوّق في نصف أبريل فقط => حظّ ماضٍ.
+
+DONE_SIZING_OOS.
