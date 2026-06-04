@@ -164,10 +164,11 @@ def main():
     print(f"  rules: TOP=peak then drop>={DROP}% & no reclaim; "
           f"HOLD=mid-trend, +{CONT}% more over next {FWD_H}h\n", flush=True)
 
-    # accumulate per-signal counts
+    # store full boolean rows so we can do combos + per-month validation
     names = None
-    top_hits = None; hold_hits = None
-    n_top = 0; n_hold = 0; n_pump = 0
+    top_rows = []; hold_rows = []
+    top_mon = []; hold_mon = []
+    n_pump = 0
 
     for mname, (s, e) in MONTHS.items():
         trades = reconstruct_trades(s, e)
@@ -192,7 +193,6 @@ def main():
             sigs, _ = compute_signals(df)
             if names is None:
                 names = list(sigs.keys())
-                top_hits = np.zeros(len(names)); hold_hits = np.zeros(len(names))
             peak_i = epi[int(np.argmax(ep_hi))]
             peak_px = hi[peak_i]
             fwd = max(1, FWD_H)
@@ -212,33 +212,74 @@ def main():
                     label = "HOLD"
                 else:
                     continue
-                vec = np.array([bool(sigs[k][i]) and np.isfinite(sigs[k][i]) for k in names])
+                vec = [bool(sigs[k][i]) and np.isfinite(sigs[k][i]) for k in names]
                 if label == "TOP":
-                    top_hits += vec; n_top += 1
+                    top_rows.append(vec); top_mon.append(mname)
                 else:
-                    hold_hits += vec; n_hold += 1
+                    hold_rows.append(vec); hold_mon.append(mname)
         gc.collect()
 
-    if not n_top or not n_hold:
+    if not top_rows or not hold_rows:
         print("not enough labelled points."); return
 
-    recall = top_hits / n_top
-    fpr = hold_hits / n_hold
-    # precision at the natural sampled ratio
-    prec = top_hits / np.maximum(top_hits + hold_hits, 1)
+    TM = np.array(top_rows, dtype=bool)        # (n_top, k)
+    HM = np.array(hold_rows, dtype=bool)       # (n_hold, k)
+    tmon = np.array(top_mon); hmon = np.array(hold_mon)
+    n_top, n_hold = len(TM), len(HM)
+    base = n_top / (n_top + n_hold) * 100
+
+    recall = TM.mean(0); fpr = HM.mean(0)
+    prec = TM.sum(0) / np.maximum(TM.sum(0) + HM.sum(0), 1)
     lift = recall / np.maximum(fpr, 1e-6)
 
     order = np.argsort(-lift)
     print(f"\n##### TOP SIGNATURE — {n_pump} pumps, {n_top} TOP candles, "
-          f"{n_hold} HOLD candles #####")
+          f"{n_hold} HOLD candles (base rate {base:.0f}%) #####")
     print(f"{'signal':<18}{'recall':>8}{'fpr':>8}{'lift':>7}{'prec':>7}")
     print(f"{'(الإشارة)':<18}{'صحيح':>8}{'خاطئ':>8}{'×':>7}{'دقة':>7}")
     print("-" * 50)
     for j in order:
         print(f"{names[j]:<18}{recall[j]*100:>7.0f}%{fpr[j]*100:>7.0f}%"
               f"{lift[j]:>6.1f}x{prec[j]*100:>6.0f}%")
+
+    # ---- best 2- and 3-signal AND-combinations (precision via lift) ----
+    import itertools
+    k = len(names)
+    combos = []
+    for r in (2, 3):
+        for cc in itertools.combinations(range(k), r):
+            tc = np.all(TM[:, cc], axis=1); hc = np.all(HM[:, cc], axis=1)
+            rec = tc.mean()
+            if rec < 0.12:                      # must catch >=12% of tops to matter
+                continue
+            fp = hc.mean(); lf = rec / max(fp, 1e-6)
+            pr = tc.sum() / max(tc.sum() + hc.sum(), 1)
+            combos.append((lf, rec, fp, pr, cc))
+    combos.sort(reverse=True)
+    print(f"\n##### BEST COMBINATIONS (AND), recall>=12% #####")
+    print(f"{'combo':<40}{'recall':>8}{'fpr':>7}{'lift':>7}{'prec':>7}")
+    for lf, rec, fp, pr, cc in combos[:12]:
+        label = " + ".join(names[i] for i in cc)
+        print(f"{label:<40}{rec*100:>7.0f}%{fp*100:>6.0f}%{lf:>6.1f}x{pr*100:>6.0f}%")
+
+    # ---- per-month validation of the top-5 single marks (overfit guard) ----
+    print(f"\n##### PER-MONTH lift of top-5 singles (does it hold out-of-sample?) #####")
+    months = sorted(set(top_mon) | set(hold_mon))
+    head = "signal".ljust(18) + "".join(m[-2:].rjust(7) for m in months)
+    print(head)
+    for j in order[:5]:
+        cells = ""
+        for m in months:
+            tm_m = TM[tmon == m, j]; hm_m = HM[hmon == m, j]
+            if len(tm_m) == 0 or len(hm_m) == 0:
+                cells += "   -  "; continue
+            lf = tm_m.mean() / max(hm_m.mean(), 1e-6)
+            cells += f"{lf:>6.1f}x"
+        print(names[j].ljust(18) + cells)
+
     print("\nالمفيد = recall عالٍ + fpr منخفض (lift كبير). "
           "lift~1 يعني الإشارة تظهر في الاستمرار بنفس قدر القمة → عديمة الفائدة.")
+    print("ثبات lift عبر الأشهر = إشارة حقيقية؛ تذبذبه = صدفة/إفراط بالعيّنة.")
     print("\nDONE_TOPSIG.", flush=True)
 
 
