@@ -114,6 +114,16 @@ def simulate_symbol(df, t0, t1):
             if pos >= 2:
                 p1, p2 = phi[pos - 2], phi[pos - 1]
                 hdiv = (h[p2] < h[p1]) and (rs[p2] > rs[p1])   # lower high, higher RSI high
+        # ---- user's 3-candle micro-divergence (no pivots): price vs RSI over last W ----
+        W = 3
+        pchg = (c[i - 1] / c[i - W] - 1) * 100 if i - W >= 0 else 0.0   # % price change
+        rchg = (rs[i - 1] - rs[i - W]) if i - W >= 0 else 0.0           # RSI point change
+        if long:
+            d3 = (pchg < 0) and (rchg > 0)                    # price down, RSI up
+            d3s = (pchg <= -0.5) and (rchg >= 2)              # with magnitude threshold
+        else:
+            d3 = (pchg > 0) and (rchg < 0)                    # price up, RSI down
+            d3s = (pchg >= 0.5) and (rchg <= -2)
         if long:
             entry = c[i]; swing = l[i - SWING:i + 1].min()
             sl_b = swing; sl_a = swing - ATR_MULT * a[i]
@@ -147,7 +157,7 @@ def simulate_symbol(df, t0, t1):
         Ra = outcome(sl_a, tp_a, risk_a) - feeR_a
         open_until = i + 1   # block re-entry next bar; real exit may be later (approx)
         yield {"dir": "L" if long else "S", "Rb": Rb, "Ra": Ra,
-               "ok_slope": ok_slope, "hdiv": hdiv}
+               "ok_slope": ok_slope, "hdiv": hdiv, "d3": d3, "d3s": d3s}
 
 
 def main():
@@ -171,6 +181,8 @@ def main():
     Ra = np.array([t["Ra"] for t in trades])
     slope_ok = np.array([t["ok_slope"] for t in trades])
     hdiv = np.array([t["hdiv"] for t in trades])
+    d3 = np.array([t["d3"] for t in trades])
+    d3s = np.array([t["d3s"] for t in trades])
 
     def rep(name, R, mask=None):
         r = R if mask is None else R[mask]
@@ -192,6 +204,12 @@ def main():
     rep("base + hdiv + skip-flat", Rb, hdiv & slope_ok)
     rep("base+ATR + hdiv", Ra, hdiv)
     rep("base+ATR + hdiv + flat", Ra, hdiv & slope_ok)
+    print("---- + 3-CANDLE micro-divergence (user's idea: price vs RSI, last 3 bars) ----")
+    rep("base + div3", Rb, d3)
+    rep("base + div3 + skip-flat", Rb, d3 & slope_ok)
+    rep("base + div3_strong", Rb, d3s)
+    rep("base+ATR + div3", Ra, d3)
+    rep("base+ATR + div3_strong", Ra, d3s)
     print(f"\nالدايفرجنس المخفي مُطبّق على آخر قاعَي/قمّتَي تأرجح مؤكّدَين (fractal +-2).")
     print(f"نقطة التعادل عند 1.5:1 = WR 40%. الفيديو يدّعي ~70%.")
     print(f"exp>0 => توقّع موجب. قارن WR الفعلي بالـ70% المُدّعى.")
