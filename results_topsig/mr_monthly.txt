@@ -1,0 +1,12 @@
+Drought MR + MONTHLY trend determinant (entry RSI>30 + daily>EMA10, TP15/SL15)
+
+monthly det      n     FULL     2024     2025   win%
+--------------------------------------------------
+none          788    +0.2%    -7.7%    +3.6%    55% *
+M-up            6    -6.7%   -17.0%    +nan%    33%
+M-down        782    +0.3%    -7.6%    +3.6%    55% *
+M>EMA6          3    +3.7%    +nan%    +nan%    67%
+
+هل محدّد شهري معيّن يرفع 2025 فوق +3.8% الأساس؟
+
+DONE_MRMON.
