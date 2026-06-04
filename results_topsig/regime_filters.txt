@@ -1,0 +1,23 @@
+Regime filters: BTC vs STABLE, on daily/weekly/monthly (in-sample)
+
+  BTC bars=8766, STABLE bars=7740
+    ('BTC', 'daily'): risk-on 53% of periods
+    ('STABLE', 'daily'): risk-on 61% of periods
+    ('BTC', 'weekly'): risk-on 60% of periods
+    ('STABLE', 'weekly'): risk-on 67% of periods
+    ('BTC', 'monthly'): risk-on 77% of periods
+    ('STABLE', 'monthly'): risk-on 50% of periods
+
+config                    n       exp   months+  cons%
+--------------------------------------------------------
+BASE (no filter)       2394     +8.6%    15/42     36%
+BTC / daily            2088     +9.2%    13/38     34%
+BTC / weekly           2131     +7.8%    12/34     35%
+BTC / monthly          2296     +8.3%    14/36     39%
+STABLE / daily         1197     +4.1%    12/42     29%
+STABLE / weekly        1667     +2.9%    13/41     32%
+STABLE / monthly       1080     -0.9%     8/26     31%
+
+الفائز = أعلى cons% (نسبة الأشهر الموجبة) مع حفاظ معقول على التوقّع وعدد الصفقات.
+
+DONE_REGIME.
