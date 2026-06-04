@@ -19,8 +19,11 @@ sys.path.insert(0, ".")
 from binance_sim import pit_universe as PIT               # noqa: E402
 
 START = "2022-06-01"; END = "2026-06-01"
+if "2024" in sys.argv:                        # gold-standard OOS regime
+    START = "2023-06-01"; END = "2025-01-01"
 DS = int(pd.Timestamp(START, tz="UTC").timestamp()*1000)
 DE = int(pd.Timestamp(END, tz="UTC").timestamp()*1000)
+SIG_FROM = int(pd.Timestamp("2024-01-01", tz="UTC").timestamp()*1000) if "2024" in sys.argv else DS
 SL = 0.10; WINDOW_MS = 90*24*3600*1000
 TPS = [0.10, 0.50]
 COSTS = [0.2, 0.5, 1.0, 1.5, 2.0]        # round-trip % (spread+slippage+fee)
@@ -52,7 +55,8 @@ def entries(d):
     for i in range(100, n):
         if (np.isfinite(q25[i-1]) and bbw[i-1] <= q25[i-1] and bbw[i] > bbw[i-1]
                 and hist[i] > hist[i-1] > hist[i-2] and macd[i] > macd[i-1]
-                and abs(e20[i]-e50[i])/c[i] < 0.03 and c[i] > o[i]):
+                and abs(e20[i]-e50[i])/c[i] < 0.03 and c[i] > o[i]
+                and int(t[i]) >= SIG_FROM):
             out.append((int(t[i]), float(c[i])))
     return out
 
