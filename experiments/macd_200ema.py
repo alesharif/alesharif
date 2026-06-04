@@ -53,6 +53,26 @@ def atr(h, l, c, n=14):
     return pd.Series(tr).ewm(alpha=1 / n, adjust=False).mean().to_numpy()
 
 
+def rsi(c, n=14):
+    d = np.diff(c, prepend=c[0]); up = np.where(d > 0, d, 0.0); dn = np.where(d < 0, -d, 0.0)
+    ru = pd.Series(up).ewm(alpha=1 / n, adjust=False).mean().to_numpy()
+    rd = pd.Series(dn).ewm(alpha=1 / n, adjust=False).mean().to_numpy()
+    return 100 - 100 / (1 + ru / np.where(rd == 0, 1e-9, rd))
+
+
+K_PIV = 2          # fractal pivot half-window (confirmed K bars later)
+
+
+def pivots(arr, low=True):
+    """Indices of confirmed swing lows (low=True) / highs over +-K_PIV window."""
+    n = len(arr); idx = []
+    for p in range(K_PIV, n - K_PIV):
+        w = arr[p - K_PIV:p + K_PIV + 1]
+        if (low and arr[p] == w.min()) or (not low and arr[p] == w.max()):
+            idx.append(p)
+    return np.array(idx, dtype=int)
+
+
 def simulate_symbol(df, t0, t1):
     """Yield trades for one symbol as dicts {dir, R_base, R_atr, ok_slope, t}."""
     o = df["open"].to_numpy(float); h = df["high"].to_numpy(float)
@@ -64,6 +84,8 @@ def simulate_symbol(df, t0, t1):
     e200 = ema(c, 200)
     macd = ema(c, 12) - ema(c, 26); sig = ema(macd, 9)
     a = atr(h, l, c, 14)
+    rs = rsi(c, 14)
+    plo = pivots(l, low=True); phi = pivots(h, low=False)
     cup = (macd[:-1] <= sig[:-1]) & (macd[1:] > sig[1:])     # cross up at i (index+1)
     cdn = (macd[:-1] >= sig[:-1]) & (macd[1:] < sig[1:])
     cross_up = np.concatenate([[False], cup])
@@ -80,6 +102,18 @@ def simulate_symbol(df, t0, t1):
         if not (long or short):
             continue
         slope = (e200[i] - e200[i - SLOPE_K]) / e200[i] if e200[i] > 0 else 0.0
+        # ---- hidden divergence on last two CONFIRMED pivots before entry ----
+        hdiv = False
+        if long:
+            pos = np.searchsorted(plo, i - K_PIV, side="right")
+            if pos >= 2:
+                p1, p2 = plo[pos - 2], plo[pos - 1]
+                hdiv = (l[p2] > l[p1]) and (rs[p2] < rs[p1])   # higher low, lower RSI low
+        else:
+            pos = np.searchsorted(phi, i - K_PIV, side="right")
+            if pos >= 2:
+                p1, p2 = phi[pos - 2], phi[pos - 1]
+                hdiv = (h[p2] < h[p1]) and (rs[p2] > rs[p1])   # lower high, higher RSI high
         if long:
             entry = c[i]; swing = l[i - SWING:i + 1].min()
             sl_b = swing; sl_a = swing - ATR_MULT * a[i]
@@ -112,7 +146,8 @@ def simulate_symbol(df, t0, t1):
         Rb = outcome(sl_b, tp_b, risk_b) - feeR
         Ra = outcome(sl_a, tp_a, risk_a) - feeR_a
         open_until = i + 1   # block re-entry next bar; real exit may be later (approx)
-        yield {"dir": "L" if long else "S", "Rb": Rb, "Ra": Ra, "ok_slope": ok_slope}
+        yield {"dir": "L" if long else "S", "Rb": Rb, "Ra": Ra,
+               "ok_slope": ok_slope, "hdiv": hdiv}
 
 
 def main():
@@ -135,6 +170,7 @@ def main():
     Rb = np.array([t["Rb"] for t in trades])
     Ra = np.array([t["Ra"] for t in trades])
     slope_ok = np.array([t["ok_slope"] for t in trades])
+    hdiv = np.array([t["hdiv"] for t in trades])
 
     def rep(name, R, mask=None):
         r = R if mask is None else R[mask]
@@ -151,7 +187,13 @@ def main():
     rep("base + 2xATR SL", Ra)
     rep("base + skip-flat", Rb, slope_ok)
     rep("base+ATR + skip-flat", Ra, slope_ok)
-    print(f"\nنقطة التعادل عند 1.5:1 = WR 40%. الفيديو يدّعي ~70%.")
+    print("---- + HIDDEN DIVERGENCE filter (the video's '70%' booster) ----")
+    rep("base + hdiv", Rb, hdiv)
+    rep("base + hdiv + skip-flat", Rb, hdiv & slope_ok)
+    rep("base+ATR + hdiv", Ra, hdiv)
+    rep("base+ATR + hdiv + flat", Ra, hdiv & slope_ok)
+    print(f"\nالدايفرجنس المخفي مُطبّق على آخر قاعَي/قمّتَي تأرجح مؤكّدَين (fractal +-2).")
+    print(f"نقطة التعادل عند 1.5:1 = WR 40%. الفيديو يدّعي ~70%.")
     print(f"exp>0 => توقّع موجب. قارن WR الفعلي بالـ70% المُدّعى.")
     print(f"\nDONE_MACD200.", flush=True)
 
