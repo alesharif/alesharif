@@ -1,0 +1,14 @@
+BTC weekly GREEN-candle filter (alone & with 99d), developed system
+
+  BTC weekly: 209 weeks, green 50% of weeks
+
+config                          n      exp  months+  cons%
+----------------------------------------------------------
+base (developed)             2394    +8.6%   15/42     36%
+99d only                     2057    +9.2%   18/41     44%
+BTC weekly-green             1669    +9.7%   16/38     42%
+BTC green + 99d              1462   +11.0%   17/37     46%
+
+نقارن: هل شرط BTC الأخضر الأسبوعي يرفع التوقّع/الثبات فوق 99 يوم؟
+
+DONE_GREEN.
