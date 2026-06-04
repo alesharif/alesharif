@@ -1,0 +1,18 @@
+STOCH-MTF forward-return test on ALT universe (exit-agnostic)
+
+  universe: 543 symbols; resampling weekly/monthly...
+
+##### 428 alt coins #####
+set                          n      mean   median   win%   >+20%
+-----------------------------------------------------------------
+--- forward 4 weeks ---
+SIGNAL (4w)               2295     -1.9%    -10.3%     33%      19%
+baseline (4w)            48814     -0.2%     -5.3%     39%      16%
+--- forward 12 weeks ---
+SIGNAL (12w)              2295    -22.7%    -32.4%     20%      10%
+baseline (12w)           48814     -0.5%    -11.6%     38%      24%
+
+إذا SIGNAL ≈ baseline => الإشارة لا ترفع احتمال الانفجار فوق الصدفة.
+'>+20%' = نسبة الحالات التي حقّقت انفجاراً (+20%) خلال المدة.
+
+DONE_ALTFWD.
