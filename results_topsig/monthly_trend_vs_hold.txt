@@ -1,0 +1,22 @@
+MONTHLY trend-timing vs BUY&HOLD — crypto, real data
+
+rule: hold while monthly close > N-month SMA, else cash. fee 0.2%/switch.
+
+### BTC-USD  (142 months ≈ 11.8y) ###
+strategy          CAGR   totRet   maxDD  switch  inMkt
+Buy&Hold           56%  +18670%    -76%       0   100%
+SMA7 filter        50%  +11663%    -56%      22    60%
+SMA10 filter       69%  +47672%    -60%      12    65%
+SMA12 filter       56%  +17832%    -75%      10    65%
+
+### ETH-USD  (104 months ≈ 8.7y) ###
+strategy          CAGR   totRet   maxDD  switch  inMkt
+Buy&Hold           10%    +133%    -90%       0   100%
+SMA7 filter        29%    +796%    -58%      14    48%
+SMA10 filter       13%    +183%    -68%      16    47%
+SMA12 filter       10%    +133%    -70%      16    50%
+
+المهمّ: هل يقلّص الفلتر maxDD (الهبوط) بوضوح مع حفاظ معقول على CAGR؟
+هذا جوهر الفائدة — حماية، لا تعظيم عائد.
+
+DONE_MONTHLY.
