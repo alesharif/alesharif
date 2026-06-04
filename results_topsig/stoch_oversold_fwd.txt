@@ -1,0 +1,28 @@
+FAITHFUL test: monthly stoch %K>%D (& cross) with %D<=10, exit-agnostic
+
+  universe: 559 symbols; building monthly...
+
+##### 397 alt coins #####
+
+--- forward 1 month(s) ---
+set                       n     mean   median   win%   >+50%
+%K>%D & D<=10           949    -0.3%    -6.2%    39%      5%
+cross & D<=10           297    -1.4%    -5.1%    40%      4%
+baseline (all)         6846    -0.1%    -7.4%    38%      7%
+
+--- forward 3 month(s) ---
+set                       n     mean   median   win%   >+50%
+%K>%D & D<=10           949    -9.3%   -25.3%    29%     10%
+cross & D<=10           297    -8.0%   -10.8%    30%      5%
+baseline (all)         6846    -4.5%   -15.5%    33%     11%
+
+--- forward 6 month(s) ---
+set                       n     mean   median   win%   >+50%
+%K>%D & D<=10           949   -32.8%   -49.9%    14%      5%
+cross & D<=10           297   -45.8%   -49.6%     6%      1%
+baseline (all)         6846   -20.9%   -34.3%    21%      6%
+
+إن كان signal ≈ baseline => الفلتر لا يرفع احتمال الانفجار فوق الصدفة.
+'>+50%' = نسبة الحالات التي انفجرت +50% خلال المدة.
+
+DONE_OVRSLD.
