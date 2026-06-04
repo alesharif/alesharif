@@ -1,0 +1,17 @@
+FAITHFUL Wobbler (SMA of RSI 54/81) + user's system (SL10, TP50)
+
+### Wobbler entry — from LOW zone (oversold turn): 548 signals ###
+  TP+50% hit 11%, stop 83%, win 11%
+  expectancy @fee0.2%:           -1.9%/trade
+  expectancy @realistic(1%+1%):  -3.5%/trade
+  expectancy @harsh(2%+1.5%):    -5.0%/trade
+
+### Wobbler entry — ANY cross-up: 1579 signals ###
+  TP+50% hit 15%, stop 82%, win 15%
+  expectancy @fee0.2%:           -0.7%/trade
+  expectancy @realistic(1%+1%):  -2.3%/trade
+  expectancy @harsh(2%+1.5%):    -3.7%/trade
+
+إن بقي موجباً عند 1%+1% => حافة Wobbler الأمينة تصمد. لاحظ: بيانات Binance/OKX لا KuCoin.
+
+DONE_WOBBLER.
