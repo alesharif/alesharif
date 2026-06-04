@@ -66,6 +66,7 @@ def main():
     syms = [s["symbol"] for s in r["data"] if s.get("quoteCurrency") == "USDT" and s.get("enableTrading")]
     print(f"  {len(syms)} symbols; fetching daily + backtesting...", flush=True)
     BO = {"full": [], 2024: [], 2025: []}; MR = {"full": [], 2024: [], 2025: []}
+    DBG = {"cross": 0, "afteridx": 0, "afterconf": 0}
     done = 0
     for sym in syms:
         j = get(f"https://api.kucoin.com/api/v1/market/candles?type=1day&symbol={sym}&startAt={START}&endAt={END}")
@@ -105,11 +106,14 @@ def main():
             for wi in range(15, len(wc)):
                 if not (wr[wi-1] <= 30 and wr[wi] > 30 and wt[wi] >= SF):
                     continue
+                DBG["cross"] += 1
                 i = int(np.searchsorted(t, wt[wi], side="right")-1)
                 if i < 99 or i >= n-1 or not np.isfinite(liq[i]) or liq[i] <= LIQ_MIN:
                     continue
+                DBG["afteridx"] += 1
                 if not (c[i] > e10[i] and (c[i]/c[i-99]-1) >= -0.30):
                     continue
+                DBG["afterconf"] += 1
                 nr = first_touch(h, l, c, i, 0.15, 0.15, 60)
                 bucket(MR, int(pd.Timestamp(t[i], unit="ms").year), nr)
 
@@ -123,6 +127,8 @@ def main():
     print("-" * 60)
     rep("BREAKOUT", BO)
     rep("MEAN-REVERT", MR)
+    print(f"\nMR diag: weekly-crosses={DBG['cross']}, after idx/liq={DBG['afteridx']}, "
+          f"after confirm+99={DBG['afterconf']}")
     print("\nBinance kept: breakout 2024 ~+19%, MR 2025 ~+5%. هل تصمد على KuCoin؟")
     print("\nDONE_KUOOS.", flush=True)
 
