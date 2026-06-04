@@ -1,0 +1,26 @@
+ENTRY filter — are already-exhausted entries net losers?
+
+  2025-12 done
+  2026-01 done
+  2026-02 done
+  2026-03 done
+  2026-04 done
+  2026-05 done
+
+##### ENTRY-FILTER analysis — 405 trades #####
+baseline: mean +0.21%/trade  PF 1.10  total +11%  WR 32%
+
+filter (skip if true)   n_rm  rm_mean  rm_PF |  n_keep  kp_mean  kp_PF kp_total
+----------------------------------------------------------------------------------------
+ext>15%                    7  +53.89%  43.42 |     398   -0.73%   0.66     -36%
+ext>25%                    1  +33.34%    inf |     404   +0.13%   1.06      +7%
+rsi>70                     8  +25.46%  24.34 |     397   -0.30%   0.86     -15%
+rsi>75                     3  +15.69%    inf |     402   +0.10%   1.04      +5%
+climax<=6h                51   +0.48%   1.18 |     354   +0.17%   1.08      +8%
+run24h>30%                33  +11.56%   3.88 |     372   -0.79%   0.60     -37%
+bb_above                  10  +23.20%  26.62 |     395   -0.37%   0.83     -18%
+
+فلتر جيّد = rm_mean سالب بوضوح (المُستبعَدة خاسرة) و kp_PF أعلى من الأساس.
+احذر: لو kp_total أقل بكثير => الفلتر يقصّ صفقات رابحة أيضاً (ذيل سمين).
+
+DONE_ENTRYFILTER.
