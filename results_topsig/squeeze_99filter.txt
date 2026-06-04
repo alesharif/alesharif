@@ -1,0 +1,15 @@
+User's 99-day-downtrend survivorship fix (developed system, TP+100, liquid)
+
+  in-sample: ALL 6000, no-99d-dn 3164, above200 2394
+  2024-bull: ALL 2003, no-99d-dn 1207, above200 1168
+  bear22-23: ALL 1511, no-99d-dn 836, above200 697
+
+filter             in-sample     2024-bull     bear22-23
+------------------------------------------------------------
+ALL                    +3.0%        +12.3%         +4.4%
+no-99d-dn              +5.3%        +19.3%         -0.4%
+above-EMA200           +8.6%        +20.2%         +0.4%
+
+إن بقي/ارتفع التوقّع مع الفلتر => قاعدتك صحيحة: تجنّب المحتضرة يحافظ على الحافة.
+
+DONE_99.
