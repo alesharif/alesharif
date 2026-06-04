@@ -1,0 +1,23 @@
+MULTI-TIMEFRAME STOCHASTIC (monthly gate + weekly cross) vs Buy&Hold
+
+coin      STR_CAGR  STR_DD  BH_CAGR   BH_DD   sw  inMkt  winner
+------------------------------------------------------------------
+BTC           +18%    -61%     +54%    -83%  120    19%   B&H
+ETH            +8%    -59%     +23%    -94%   90    18%   B&H
+BNB           +30%    -61%    +100%    -78%   84    18%   B&H
+XRP           +45%    -55%     +23%    -96%   82    20%   STRAT
+ADA           +29%    -44%     +27%    -97%   62    13%   STRAT
+SOL            +5%    -78%    +102%    -96%   58    16%   B&H
+DOGE           +9%    -43%     +68%    -90%   62    14%   B&H
+LTC            +8%    -76%     +23%    -92%  102    15%   B&H
+LINK          +41%    -79%     +56%    -90%   72    16%   B&H
+TRX           +10%    -66%     +83%    -95%   76    17%   B&H
+BCH            +3%    -69%     -18%    -97%   76    16%   STRAT
+XLM           +23%    -40%     +26%    -95%   64    13%   B&H
+------------------------------------------------------------------
+median total return  ->  STRAT +329%   B&H +2804%
+strategy beats B&H in 3/12 coins
+
+ملاحظة: اختبار على عملات كبرى ناجية = كرم للاستراتيجية؛ الـ alts الصغيرة أسوأ.
+
+DONE_STOCHMTF.
