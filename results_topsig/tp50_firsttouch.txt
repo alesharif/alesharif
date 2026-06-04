@@ -1,0 +1,15 @@
+FAITHFUL TP+50% first-touch test of the user's signal
+
+  universe: 559 symbols; finding signals...
+  397 coins, 1443 signals (monthly %K>%D & %D<=10)
+
+scenario         n    TP%  stop%  timeo%   WIN%     mean   median  TPdays
+----------------------------------------------------------------------------
+no stop       1443    35%     0%     65%    37%    -9.2%    -0.2%     47
+stop -50%     1443    31%    41%     27%    34%    -6.9%    -7.6%     41
+stop -30%     1443    29%    48%     23%    31%    -0.9%   -12.4%     36
+
+WIN% = نسبة الصفقات الرابحة فعلاً. mean = التوقّع الكامل/صفقة (الحَكَم).
+لاحظ: 'timeout' = لم تصل +50% ولا الوقف -> أُغلقت بسعر السوق (قد تكون تحت الماء).
+
+DONE_TP50.
