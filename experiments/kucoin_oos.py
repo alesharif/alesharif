@@ -100,7 +100,7 @@ def main():
         # ---- MEAN-REVERSION (weekly RSI) ----
         s = pd.Series(c, index=pd.to_datetime(t, unit="ms"))
         wk = s.resample("W").last().dropna(); wc = wk.to_numpy()
-        wt = np.asarray(wk.index.astype("int64"))//10**6
+        wt = np.array([ts.value // 10**6 for ts in wk.index])   # ns -> ms, unit-safe
         if len(wc) >= 25:
             wr = rsi(wc, 14)
             for wi in range(15, len(wc)):
