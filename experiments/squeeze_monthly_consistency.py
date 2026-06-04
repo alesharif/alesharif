@@ -104,18 +104,25 @@ def main():
         a = np.array(months[k]); bar = "#" * min(40, int(abs(a.mean())))
         print(f"  {k}  n={len(a):>3}  exp={a.mean():>+6.1f}%  {bar}")
 
-    # (B) monthly filter x 99d combos
+    # (B) monthly filter x 99d combos — now WITH per-month consistency
     def expe(p99, pm):
-        sel = [nr for _, nr, x99, xm in arr if (xm if pm else True) and (x99 if p99 else True)]
-        return (np.mean(sel) if sel else float("nan"), len(sel))
-    print(f"\n##### (B) MONTHLY filter x 99-day filter #####")
-    print(f"{'config':<28}{'n':>7}{'exp/trade':>11}")
+        sel = [(mk, nr) for mk, nr, x99, xm in arr if (xm if pm else True) and (x99 if p99 else True)]
+        if not sel:
+            return float("nan"), 0, 0, 0
+        mo = {}
+        for mk, nr in sel:
+            mo.setdefault(mk, []).append(nr)
+        posm = sum(1 for k in mo if np.mean(mo[k]) > 0)
+        return np.mean([r for _, r in sel]), len(sel), posm, len(mo)
+    print(f"\n##### (B) MONTHLY filter x 99-day filter (+ consistency) #####")
+    print(f"{'config':<26}{'n':>7}{'exp':>9}{'months+':>10}{'cons%':>7}")
     for pm, p99, name in [(False, False, "base (developed)"),
                           (False, True, "+ 99d only"),
-                          (True, False, "+ monthly filter only"),
+                          (True, False, "+ monthly only"),
                           (True, True, "+ monthly + 99d")]:
-        m, nn = expe(p99, pm)
-        print(f"{name:<28}{nn:>7}{m:>+10.1f}%")
+        m, nn, posm, tot = expe(p99, pm)
+        cons = posm/tot*100 if tot else float("nan")
+        print(f"{name:<26}{nn:>7}{m:>+8.1f}%{posm:>6}/{tot:<3}{cons:>6.0f}%")
     print("\nمتفرّقة عبر الأشهر => حافة حقيقية. مركّزة في قلّة => هشّة.")
     print("\nDONE_CONS.", flush=True)
 
