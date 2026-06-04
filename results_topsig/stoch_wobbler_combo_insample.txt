@@ -1,0 +1,11 @@
+COMBO: monthly stoch gate + Wobbler daily entry (in-sample 2022-2026)
+
+### Wobbler ONLY (no monthly gate): 2610 signals, TP+50% hit 19% ###
+   @fee0.2%: +2.3%   @realistic(1%+1%): +0.7%   @harsh(2%+1.5%): -0.7%
+
+### Wobbler + MONTHLY stoch gate: 262 signals, TP+50% hit 11% ###
+   @fee0.2%: -3.1%   @realistic(1%+1%): -4.7%   @harsh(2%+1.5%): -6.1%
+
+نقارن: هل البوّابة الشهرية ترفع التوقّع وتنجّيه خارج العيّنة؟
+
+DONE_COMBO.

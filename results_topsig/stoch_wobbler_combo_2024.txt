@@ -1,0 +1,9 @@
+COMBO: monthly stoch gate + Wobbler daily entry (2024 OOS)
+
+### Wobbler ONLY (no monthly gate): no signals
+
+### Wobbler + MONTHLY stoch gate: no signals
+
+نقارن: هل البوّابة الشهرية ترفع التوقّع وتنجّيه خارج العيّنة؟
+
+DONE_COMBO.
