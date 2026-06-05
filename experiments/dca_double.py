@@ -26,7 +26,8 @@ from binance_sim import pit_universe as PIT               # noqa: E402
 LIQ_MIN = 300_000; WIN = 120*24*3600*1000; BUDGET = 400.0
 S, E = "2022-06-01", "2026-06-01"; W0, W1 = "2025-01-01", "2026-01-01"
 DOWN = [(0.08, 60.0), (0.16, 100.0), (0.24, 100.0), (0.32, 100.0)]
-REB = [0.03, 0.06, 0.09]; EXIT_UP = 0.01
+REB = [0.03, 0.06, 0.09]; TGT = 2.0          # exit = our strategy target +100% (2x entry)
+STOP = 0.33                                   # hard stop: close all if price hits -33% from entry
 START = 10_000.0; SLOTS = 6; ALLOC = 0.10
 
 
@@ -37,7 +38,7 @@ def ema(a, n): return pd.Series(a).ewm(span=n, adjust=False).mean().to_numpy()
 def simulate(Hs, Ls, lastc, P0):
     invested = 40.0; coins = 40.0/P0
     dfill = [False]*4; rdone = [False]*3; near = False; dipped = False
-    bottom = P0; exitpx = P0*(1+EXIT_UP)
+    bottom = P0; exitpx = P0*TGT
     for k in range(len(Hs)):
         lo = Ls[k]; hi = Hs[k]
         if lo < bottom:
@@ -49,6 +50,8 @@ def simulate(Hs, Ls, lastc, P0):
             lvl, amt = DOWN[di]; price = P0*(1-lvl)
             if not dfill[di] and lo <= price and invested < BUDGET-1e-9:
                 a = min(amt, BUDGET-invested); coins += a/price; invested += a; dfill[di] = True
+        if lo <= P0*(1-STOP):                         # hard stop at -33% from entry (after fills)
+            spx = P0*(1-STOP); return (coins*spx-invested)/BUDGET*100, "stop", invested
         # rebound-fills (only after a real dip, measured from bottom)
         if dipped and invested < BUDGET-1e-9:
             rebpct = hi/bottom - 1
@@ -58,7 +61,7 @@ def simulate(Hs, Ls, lastc, P0):
                     coins += a/fp; invested += a; rdone[ri] = True
             if not near and hi >= P0*0.98 and invested < BUDGET-1e-9:
                 fp = P0*0.98; a = BUDGET-invested; coins += a/fp; invested += a; near = True
-        if hi >= exitpx:                              # take profit +1% over entry
+        if hi >= exitpx:                              # exit at our target +100% (2x entry)
             return (coins*exitpx-invested)/BUDGET*100, "exit", invested
     return (coins*lastc-invested)/BUDGET*100, "timeout", invested
 
@@ -96,9 +99,10 @@ def main():
             j0 = np.searchsorted(T, ent_t, side="right"); j1 = np.searchsorted(T, ent_t+WIN, side="right")
             Hs = H[j0:j1]; Ls = L[j0:j1]; lastc = C[min(j1, len(C)-1)]
             ret, tag, inv = simulate(Hs, Ls, lastc, P0)
-            sret = None
-            for k in range(len(Hs)):                 # simple $400 @ entry, same +1% exit, no stop
-                if Hs[k] >= P0*(1+EXIT_UP): sret = EXIT_UP*100; break
+            sret = None                              # our simple strategy: $400 @ entry, TP+100/SL-12
+            for k in range(len(Hs)):
+                if Ls[k] <= P0*0.88: sret = -12.0; break
+                if Hs[k] >= P0*2.0: sret = 100.0; break
             if sret is None:
                 sret = (lastc/P0-1)*100
             rows.append((ent_t, yr, ret, tag, inv, sret))
@@ -109,7 +113,7 @@ def main():
         if not sel:
             print(f"{label}: لا صفقات"); return
         rets = np.array([r[2] for r in sel]); tags = [r[3] for r in sel]
-        ex = sum(t == "exit" for t in tags); to = sum(t == "timeout" for t in tags)
+        ex = sum(t == "exit" for t in tags); to = sum(t == "timeout" for t in tags); st = sum(t == "stop" for t in tags)
         inv = np.array([r[4] for r in sel]); srets = np.array([r[5] for r in sel])
         # portfolio
         ss = sorted([(r[0], r[0]+WIN, r[2]) for r in sel])
@@ -126,12 +130,12 @@ def main():
         eqv = np.array(eqv); dd = ((eqv-np.maximum.accumulate(eqv))/np.maximum.accumulate(eqv)).min()*100 if len(eqv) else float("nan")
         port = (eqv[-1]/START-1)*100 if len(eqv) else float("nan")
         print(f"\n### {label}: {len(sel)} صفقة ###")
-        print(f"  وصلت +1% وخرجت: {ex} ({ex/len(sel)*100:.0f}%)   |   عالقة (لم تخرج): {to} ({to/len(sel)*100:.0f}%)")
+        print(f"  هدف +100%: {ex} ({ex/len(sel)*100:.0f}%)  |  وقف −33%: {st} ({st/len(sel)*100:.0f}%)  |  عالقة بالنافذة: {to} ({to/len(sel)*100:.0f}%)")
         print(f"  متوسط العائد/صفقة: {rets.mean():+.1f}%   |   الوسيط: {np.median(rets):+.1f}%")
         print(f"  متوسط المستثمر فعلياً: ${inv.mean():.0f} من 400")
         print(f"  أسوأ 5 صفقات: {', '.join(f'{x:+.0f}%' for x in np.sort(rets)[:5])}")
         print(f"  محفظة (6 خانات، 10%): {port:+.0f}%   تراجع {dd:+.0f}%")
-        print(f"  للمقارنة: دخول بسيط $400 +خروج 1% بلا وقف → متوسط {srets.mean():+.1f}%/صفقة")
+        print(f"  استراتيجيتنا البسيطة (دخول $400 دفعة، TP+100/SL−12) → متوسط {srets.mean():+.1f}%/صفقة")
 
     rows2025 = [r for r in rows if W0 <= pd.Timestamp(r[0], unit="ms").strftime('%Y-%m-%d') < W1 or r[1] == 2025]
     rows2025 = [r for r in rows if r[1] == 2025]
