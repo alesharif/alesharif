@@ -31,6 +31,7 @@ def main():
     raw = PIT.prefetch_universe(PIT.list_all_usdt_symbols(), ms(S), ms(E), log=lambda *a: None)
     SIM = {"full": [], 2024: [], 2025: []}; GP = {"full": [], 2024: [], 2025: []}
     gp_tp = gp_stop = ntot = 0
+    diag = {"tp": [], "stop": [], "timeout": []}      # (avg_cost/P0, invested)
     for sym, df in raw.items():
         df = df.sort_values("time").reset_index(drop=True)
         df["dt"] = pd.to_datetime(df["time"], unit="ms")
@@ -88,9 +89,12 @@ def main():
                     ex = sl; gp_stop += 1; break
                 if hi >= tp:
                     ex = tp; gp_tp += 1; break
+            tag = "tp" if ex == tp else "stop" if ex == sl else "timeout"
             if ex is None:
-                ex = lastc
+                ex = lastc; tag = "timeout"
             pnl = coins*ex - invested
+            avg_cost_ratio = (invested/coins)/P0 if coins > 0 else 1.0
+            diag[tag].append((avg_cost_ratio, invested))
             GP["full"].append(pnl/BUDGET*100)
             if yr in (2024, 2025): GP[yr].append(pnl/BUDGET*100)
         df.drop(columns=["dt"], inplace=True, errors="ignore")
@@ -103,6 +107,14 @@ def main():
     print(f"{'SIMPLE (SL12)':<16}{len(SIM['full']):>7}{m(SIM,'full'):>+8.1f}%{m(SIM,2024):>+8.1f}%{m(SIM,2025):>+8.1f}%")
     print(f"{'GRID+PYRAMID':<16}{len(GP['full']):>7}{m(GP,'full'):>+8.1f}%{m(GP,2024):>+8.1f}%{m(GP,2025):>+8.1f}%")
     print(f"\nGRID: بلغت الهدف 2x: {gp_tp/ntot*100:.0f}%   |   ضربت الوقف −12%: {gp_stop/ntot*100:.0f}%")
+    print("\n##### الإثبات الرياضي: متوسّط التكلفة والنشر حسب النتيجة #####")
+    print(f"{'النتيجة':<10}{'عدد':>7}{'متوسط التكلفة/الدخول':>22}{'متوسط المنشور $':>18}")
+    for tag, lab in [("tp", "رابحة (2x)"), ("stop", "خاسرة (وقف)"), ("timeout", "محايدة")]:
+        a = diag[tag]
+        if not a: continue
+        ac = np.mean([x[0] for x in a]); inv = np.mean([x[1] for x in a])
+        print(f"{lab:<10}{len(a):>7}{(ac-1)*100:>+20.1f}%{inv:>16.0f}$")
+    print("الرابحة تكلفتها قرب الدخول (تمايل سطحي)؛ الخاسرة خصمها أعمق + نشر أكبر = مال أكثر في الفاشلة.")
     print("⚠️ متفائل بانحياز البقاء (مخفّف بالوقف، لا مُلغى).")
     print("\nDONE_GP.", flush=True)
 
