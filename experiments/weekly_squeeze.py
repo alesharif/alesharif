@@ -101,48 +101,50 @@ def main():
             di = np.searchsorted(dt_, ent_t, side="right") - 1   # daily index at weekly close
             if di < 99:
                 continue
-            if dc[di] < dc[di-99]:                               # 99-DAY trend filter (days)
-                continue
             if np.nanmean(ddv[max(0, di-30):di]) <= LIQ_MIN:     # liquidity
                 continue
+            pass99 = dc[di] >= dc[di-99]                         # 99-DAY trend filter (days)
             P0 = float(dc[di]); yr = int(pd.Timestamp(ent_t, unit="ms").year)
             j0 = np.searchsorted(T, ent_t, side="right"); j1 = np.searchsorted(T, ent_t+WIN, side="right")
             rr = run(H[j0:j1], L[j0:j1], C[min(j1, len(C)-1)], P0, TRAIL, STOP0)
-            rows.append((ent_t, yr, rr))
+            rows.append((ent_t, yr, rr, pass99))
         df.drop(columns=["dt"], inplace=True, errors="ignore")
     del raw; gc.collect()
     rows.sort()
 
-    yrs = np.array([r[1] for r in rows]); rr = np.array([r[2] for r in rows])
-    # portfolio 10x$100 (50% deploy) on $2000
-    ss = sorted([(r[0], r[0]+WIN, r[2]) for r in rows]); cash = START; op = []; eqt = []; eqv = []
-    for et, xt, x in ss:
-        op.sort()
-        while op and op[0][0] <= et:
-            xt0, p, s = op.pop(0); cash += p; eqt.append(xt0); eqv.append(cash + sum(z for _, _2, z in op))
-        if len(op) >= 10 or cash < 100:
-            continue
-        cash -= 100.0; op.append((xt, 100.0*(1+x/100), 100.0))
-    for xt, p, s in sorted(op):
-        cash += p; eqt.append(xt); eqv.append(cash)
-    if eqv:
+    def portfolio(sel):
+        ss = sorted([(r[0], r[0]+WIN, r[2]) for r in sel]); cash = START; op = []; eqt = []; eqv = []
+        for et, xt, x in ss:
+            op.sort()
+            while op and op[0][0] <= et:
+                xt0, p, s = op.pop(0); cash += p; eqt.append(xt0); eqv.append(cash + sum(z for _, _2, z in op))
+            if len(op) >= 10 or cash < 100:
+                continue
+            cash -= 100.0; op.append((xt, 100.0*(1+x/100), 100.0))
+        for xt, p, s in sorted(op):
+            cash += p; eqt.append(xt); eqv.append(cash)
+        if not eqv:
+            return float("nan"), float("nan")
         eqt = np.array(eqt); eqv = np.array(eqv); od = np.argsort(eqt); eqt = eqt[od]; eqv = eqv[od]
         peak = np.maximum.accumulate(eqv); dd = ((eqv-peak)/peak).min()*100
         ynr = (eqt[-1]-eqt[0])/(365.25*DAY); cagr = ((eqv[-1]/START)**(1/ynr)-1)*100
-    else:
-        cagr = dd = float("nan")
+        return cagr, dd
 
-    print(f"إشارات أسبوعية: {len(rows)}\n")
-    print(f"{'السنة':<8}{'إشارات':>8}{'عائد/صفقة':>12}{'نسبة الربح':>11}")
-    print("-"*40)
-    for y in [2023, 2024, 2025, 2026, None]:
-        m = (yrs == y) if y else np.ones(len(rows), bool)
-        if not m.any():
-            continue
-        a = rr[m]; lab = "الكل" if y is None else str(y)
-        print(f"{lab:<8}{m.sum():>8}{a.mean():>+11.1f}%{(a > 0).mean()*100:>10.0f}%")
-    print("-"*40)
-    print(f"محفظة $2000 (10×$100): CAGR {cagr:+.0f}%   سحب {dd:+.0f}%")
+    def report(sel, title):
+        yrs = np.array([r[1] for r in sel]); rr = np.array([r[2] for r in sel])
+        print(f"===== {title}: {len(sel)} إشارة =====")
+        print(f"{'السنة':<8}{'إشارات':>8}{'عائد/صفقة':>12}{'نسبة الربح':>11}")
+        for y in [2023, 2024, 2025, 2026, None]:
+            m = (yrs == y) if y else np.ones(len(sel), bool)
+            if not m.any():
+                continue
+            a = rr[m]; lab = "الكل" if y is None else str(y)
+            print(f"{lab:<8}{m.sum():>8}{a.mean():>+11.1f}%{(a > 0).mean()*100:>10.0f}%")
+        cagr, dd = portfolio(sel)
+        print(f"محفظة $2000 (10×$100): CAGR {cagr:+.0f}%   سحب {dd:+.0f}%\n")
+
+    report(rows, "بدون فلتر 99")
+    report([r for r in rows if r[3]], "مع فلتر 99")
     print("⚠️ متفائل بانحياز البقاء. الإطار الأسبوعي يحتاج تاريخاً طويلاً → عيّنة أصغر.")
     print("\nDONE_WKSQ.", flush=True)
 
