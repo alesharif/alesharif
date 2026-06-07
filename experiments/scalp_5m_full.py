@@ -89,7 +89,10 @@ def main():
         cand[sym] = (dtt, trail.to_numpy())
     del raw; gc.collect()
     coins = sorted(cand)
-    print(f"عملات مؤهّلة (ضمن $2M-$200M، غير مستثناة): {len(coins)}", flush=True)
+    MAX_COINS = 150
+    if len(coins) > MAX_COINS:
+        coins = coins[:MAX_COINS]
+    print(f"عملات مؤهّلة (ضمن $2M-$200M، غير مستثناة): {len(cand)} — نختبر عيّنة {len(coins)}", flush=True)
 
     # 2) parallel prefetch 5m for candidates across the test window
     days = [d.strftime("%Y-%m-%d") for d in pd.date_range(W0, W1, freq="D")]
@@ -100,7 +103,7 @@ def main():
             HR.load_day(cd[0], "5m", cd[1])
         except Exception:
             pass
-    with ThreadPoolExecutor(max_workers=16) as ex:
+    with ThreadPoolExecutor(max_workers=24) as ex:
         list(ex.map(fetch, tasks))
     print(f"  اكتمل التحميل في {(time.time()-t0)/60:.1f} دقيقة\n", flush=True)
 
