@@ -153,8 +153,13 @@ def main():
                 elig.append(c)
         # parallel download this month's window for eligible coins
         days = [d.strftime("%Y-%m-%d") for d in pd.date_range(pd.Timestamp(ld, unit="ms"), pd.Timestamp(we, unit="ms"), freq="D")]
+        def _fetch(cd):
+            try:
+                HR.load_day(cd[0], "5m", cd[1])
+            except Exception:
+                pass
         with ThreadPoolExecutor(max_workers=24) as ex:
-            list(ex.map(lambda cd: (HR.load_day(cd[0], "5m", cd[1]) and None), [(c, d) for c in elig for d in days]))
+            list(ex.map(_fetch, [(c, d) for c in elig for d in days]))
         tr = month_trades(elig, cand, ld, ws, we)
         nwin, nloss, prof, ret = sim_month(tr)
         mon = m0.strftime("%Y-%m"); ntk = nwin+nloss; wr = nwin/ntk*100 if ntk else 0
