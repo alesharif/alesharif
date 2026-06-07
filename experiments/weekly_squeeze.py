@@ -79,6 +79,10 @@ def main():
         dd = pd.DataFrame({"c": g["close"].resample("D").last(), "v": g["volume"].resample("D").sum(),
                            "t": g["time"].resample("D").last()}).dropna()
         dc = dd["c"].to_numpy(); dt_ = dd["t"].to_numpy(); ddv = (dd["c"]*dd["v"]).to_numpy()
+        # monthly EMA10/EMA20 (lagged, last closed month)
+        mo = pd.DataFrame({"c": g["close"].resample("ME").last(), "t": g["time"].resample("ME").last()}).dropna()
+        mc = mo["c"].to_numpy(); mt = mo["t"].to_numpy()
+        me10 = ema(mc, 10); me20 = ema(mc, 20)
         # weekly candles + indicators
         wk = pd.DataFrame({"o": g["open"].resample("W").first(), "h": g["high"].resample("W").max(),
                            "l": g["low"].resample("W").min(), "c": g["close"].resample("W").last(),
@@ -103,11 +107,13 @@ def main():
                 continue
             if np.nanmean(ddv[max(0, di-30):di]) <= LIQ_MIN:     # liquidity
                 continue
-            pass99 = dc[di] >= dc[di-99]                         # 99-DAY trend filter (days)
             P0 = float(dc[di]); yr = int(pd.Timestamp(ent_t, unit="ms").year)
+            mi = np.searchsorted(mt, ent_t, side="right") - 1    # last closed month (lagged)
+            pm20 = mi >= 0 and P0 > me20[mi]                     # price > monthly EMA20
+            pm10 = mi >= 0 and P0 > me10[mi]                     # price > monthly EMA10
             j0 = np.searchsorted(T, ent_t, side="right"); j1 = np.searchsorted(T, ent_t+WIN, side="right")
             rr = run(H[j0:j1], L[j0:j1], C[min(j1, len(C)-1)], P0, TRAIL, STOP0)
-            rows.append((ent_t, yr, rr, pass99))
+            rows.append((ent_t, yr, rr, pm20, pm10))
         df.drop(columns=["dt"], inplace=True, errors="ignore")
     del raw; gc.collect()
     rows.sort()
@@ -143,8 +149,9 @@ def main():
         cagr, dd = portfolio(sel)
         print(f"محفظة $2000 (10×$100): CAGR {cagr:+.0f}%   سحب {dd:+.0f}%\n")
 
-    report(rows, "بدون فلتر 99")
-    report([r for r in rows if r[3]], "مع فلتر 99")
+    report(rows, "الأساس (بلا فلتر شهري)")
+    report([r for r in rows if r[3]], "+ فوق EMA20 الشهري")
+    report([r for r in rows if r[4]], "+ فوق EMA10 الشهري")
     print("⚠️ متفائل بانحياز البقاء. الإطار الأسبوعي يحتاج تاريخاً طويلاً → عيّنة أصغر.")
     print("\nDONE_WKSQ.", flush=True)
 
