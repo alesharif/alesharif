@@ -22,7 +22,7 @@ MONTH = "2025-01"; US, UE = "2024-11-01", "2025-02-01"
 VLO, VHI = 2e6, 2e8
 START = 2000.0; STAKE = 0.10; MAXPOS = 10
 TP = 0.03; SL = 0.02; COST = 0.25; MAXHOLD = 3*24*12; WARMUP_D = 45
-BANDS = [(0, 100, "بلا RSI (أساس)"), (20, 25, "20-25"), (25, 30, "25-30"), (35, 40, "35-40")]
+BANDS = [(0, 100, "بلا RSI (أساس)"), (0, 40, "RSI<40"), (40, 50, "40-50"), (50, 60, "50-60"), (60, 70, "60-70"), (70, 100, "RSI>70")]
 STABLE = {"USDC","FDUSD","TUSD","USDP","DAI","BUSD","USDD","EUR","EURI","AEUR","GBP",
           "USTC","PYUSD","XUSD","EURT","BFUSD"}
 COMMODITY = {"PAXG","XAUT","WBTC","WBETH","BETH"}
@@ -152,7 +152,7 @@ def main():
         if lo == 0 and hi == 100:
             sel = [(et, xt, rr) for ris, rv, et, xt, rr in sigs]                  # baseline
         else:
-            sel = [(et, xt, rr) for ris, rv, et, xt, rr in sigs if ris and lo <= rv < hi]  # rising + in band
+            sel = [(et, xt, rr) for ris, rv, et, xt, rr in sigs if lo <= rv < hi]  # rising + in band
         nwin, nloss, prof, ret = sim_month(sel)
         ntk = nwin+nloss; wr = nwin/ntk*100 if ntk else 0
         print(f"{lab:<18}{len(sel):>7}{nwin:>7}{nloss:>7}{wr:>5.0f}%{ret:>+8.1f}%{prof:>+8,.0f}$")
