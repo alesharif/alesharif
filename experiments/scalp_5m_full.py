@@ -146,43 +146,40 @@ def main():
     if not trades:
         print("لا إشارات."); return
     trades.sort()
+    import pickle
+    pickle.dump(trades, open("/tmp/trades5m.pkl", "wb"))   # save for fast re-reporting
 
-    # 4) portfolio: stake 10% equity, max 10 concurrent, compounding
-    cash = START; op = []; evt = []                 # evt: (time, equity)
-    tr_month = []                                    # (entry_month, ret_sign)
+    # 4) INDEPENDENT per-month: each month starts fresh at $2,000, wipes, next month.
+    from collections import defaultdict
+    bymon = defaultdict(list)
     for et, xt, rr in trades:
-        op.sort()
-        while op and op[0][0] <= et:
-            xt0, payout, stake = op.pop(0); cash += payout
-        equity = cash + sum(s for _, _2, s in op)
-        if len(op) >= MAXPOS or cash <= 1:
-            continue
-        stake = min(equity*STAKE, cash)
-        cash -= stake; op.append((xt, stake*(1+rr/100), stake))
-        evt.append((et, cash + sum(s for _, _2, s in op)))
-        tr_month.append((pd.Timestamp(et, unit="ms").strftime("%Y-%m"), rr > 0))
-    for xt, payout, stake in sorted(op):
-        cash += payout; evt.append((xt, cash))
-    # monthly equity (last value per month)
-    es = pd.Series([e for _, e in evt], index=pd.to_datetime([t for t, _ in evt], unit="ms"))
-    monthly_eq = es.resample("ME").last()
-    # monthly trade stats
-    dfm = pd.DataFrame(tr_month, columns=["mon", "win"])
-    cnt = dfm.groupby("mon").size(); wr = dfm.groupby("mon")["win"].mean()*100
+        bymon[pd.Timestamp(et, unit="ms").strftime("%Y-%m")].append((et, xt, rr))
 
-    print(f"\n{'الشهر':<10}{'صفقات':>7}{'نسبة الربح':>11}{'عائد الشهر':>12}{'رأس المال':>12}{'ربح $':>10}")
-    print("-"*64)
-    prev = START
-    for ts in monthly_eq.index:
-        mon = ts.strftime("%Y-%m"); endv = monthly_eq.loc[ts]
-        rmon = (endv/prev-1)*100; prof = endv-prev
-        nt = int(cnt.get(mon, 0)); w = wr.get(mon, float("nan"))
-        print(f"{mon:<10}{nt:>7}{w:>10.0f}%{rmon:>+11.1f}%{endv:>11,.0f}${prof:>+9,.0f}$")
-        prev = endv
-    fin = monthly_eq.iloc[-1]
-    print("-"*64)
-    print(f"النهائي: ${fin:,.0f} من $2,000  =  {(fin/START-1)*100:+.0f}%  على سنتين")
-    print(f"الإعداد: 5m MACD0 + فلتر MACD صاعد 15m/1h/4h/1d | TP+3/SL-2 | عمولة {COST}% | 10% للصفقة | 10 متزامنة")
+    print(f"\n{'الشهر':<9}{'رابحة':>7}{'خاسرة':>7}{'نسبة الربح':>11}{'عائد%':>9}{'ربح $':>10}")
+    print("-"*53)
+    tot_prof = 0.0; pos_m = 0; nm = 0
+    for mon in sorted(bymon):
+        mt = sorted(bymon[mon]); cash = START; op = []; nwin = nloss = 0
+        for et, xt, rr in mt:
+            op.sort()
+            while op and op[0][0] <= et:
+                xt0, payout, stake = op.pop(0); cash += payout
+            equity = cash + sum(s for _, _2, s in op)
+            if len(op) >= MAXPOS or cash <= 1:
+                continue
+            stake = min(equity*STAKE, cash); cash -= stake
+            op.append((xt, stake*(1+rr/100), stake))
+            if rr > 0: nwin += 1
+            else: nloss += 1
+        for xt, payout, stake in sorted(op):
+            cash += payout
+        prof = cash - START; ret = (cash/START-1)*100; ntk = nwin+nloss
+        wr = nwin/ntk*100 if ntk else float("nan")
+        print(f"{mon:<9}{nwin:>7}{nloss:>7}{wr:>10.0f}%{ret:>+8.1f}%{prof:>+9,.0f}$")
+        tot_prof += prof; pos_m += ret > 0; nm += 1
+    print("-"*53)
+    print(f"أشهر موجبة: {pos_m}/{nm}   |   مجموع الربح (لو $2000 كل شهر مستقل): {tot_prof:+,.0f}$")
+    print(f"الإعداد: 5m MACD0 + فلتر MACD صاعد 15m/1h/4h/1d | TP+3/SL-2 | عمولة {COST}% | 10%/صفقة | 10 متزامنة | $2000/شهر مستقل")
     print("⚠️ انحياز بقاء (عملات حالية). عمولة وانزلاق محسوبان تقديرياً.")
     print("\nDONE_FULL5M.", flush=True)
 
