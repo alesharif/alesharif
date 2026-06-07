@@ -86,11 +86,10 @@ def main():
             ent_t = int(wt[w]); di = np.searchsorted(dt_, ent_t, side="right") - 1
             if di < 30 or np.nanmean(ddv[max(0, di-30):di]) <= LIQ_MIN:
                 continue
-            d_above10 = dslow[w] > 10
             P0 = float(dc[di]); yr = int(pd.Timestamp(ent_t, unit="ms").year)
             j0 = np.searchsorted(T, ent_t, side="right"); j1 = np.searchsorted(T, ent_t+WIN, side="right")
             rr = run(H[j0:j1], L[j0:j1], C[min(j1, len(C)-1)], P0, TRAIL, STOP0)
-            rows.append((ent_t, yr, rr, d_above10))
+            rows.append((ent_t, yr, rr, float(dslow[w])))
         df.drop(columns=["dt"], inplace=True, errors="ignore")
     del raw; gc.collect()
     rows.sort()
@@ -128,8 +127,9 @@ def main():
         cagr, dd = portfolio(sel)
         print(f"محفظة $2000 (10×$100): CAGR {cagr:+.0f}%   سحب {dd:+.0f}%\n")
 
-    report(rows, "تقاطع ستوكاستك أسبوعي (صِرف)")
-    report([r for r in rows if r[3]], "+ الخط البطيء %D > 10")
+    report(rows, "صِرف (بلا عتبة)")
+    for thr in [10, 15, 20, 25, 30]:
+        report([r for r in rows if r[3] > thr], f"+ الخط البطيء %D > {thr}")
     print("⚠️ متفائل بانحياز البقاء.")
     print("\nDONE_WSTOCH.", flush=True)
 
