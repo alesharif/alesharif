@@ -123,26 +123,27 @@ def main():
 
     # (A) ACTIVE: breakout when supply>=THR, MR when supply<THR
     sigs = sorted([(e, x, rr, 'B') for e, x, rr in B] + [(e, x, rr, 'M') for e, x, rr in M])
-    cash = START; op = []; eqt = []; eqv = []
+    cash = START; op = []; eqt = []; eqv = []      # op: (exit_t, payout, stake, eng)
     for et, xt, rr, eng in sigs:
-        op.sort()
+        op.sort(key=lambda z: z[0])
         while op and op[0][0] <= et:
-            _, p, _e = op.pop(0); cash += p; eqt.append(_); eqv.append(cash+sum(z for _, _2, z in op))
+            _0, p, _s, _e = op.pop(0); cash += p; eqt.append(_0); eqv.append(cash+sum(z[2] for z in op))
+        deployed = sum(z[2] for z in op); equity = cash+deployed
         on = supply(et) >= THR
         if eng == 'B':
-            if not on or sum(1 for z in op if z[2] == 'B') >= B_SLOTS:
+            if not on or sum(1 for z in op if z[3] == 'B') >= B_SLOTS:
                 continue
-            stake = (cash+sum(z for _, _2, z in op))*B_STAKE
+            stake = equity*B_STAKE
         else:
-            if on or sum(1 for z in op if z[2] == 'M') >= M_SLOTS:
+            if on or sum(1 for z in op if z[3] == 'M') >= M_SLOTS:
                 continue
-            stake = (cash+sum(z for _, _2, z in op))*M_STAKE
+            stake = equity*M_STAKE
         stake = min(stake, cash)
         if stake < 1:
             continue
-        cash -= stake; op.append((xt, stake*(1+rr/100), eng))
-    for xt, p, _e in sorted(op):
-        cash += p; eqt.append(xt); eqv.append(cash)
+        cash -= stake; op.append((xt, stake*(1+rr/100), stake, eng))
+    for z in sorted(op):
+        cash += z[1]; eqt.append(z[0]); eqv.append(cash)
 
     # (B) HYBRID: hold BTC when supply>=THR, MR sleeve when supply<THR
     mr_by = {}
