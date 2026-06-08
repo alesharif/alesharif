@@ -67,13 +67,16 @@ def transition_matrix(lab: np.ndarray) -> np.ndarray:
 
 
 def markov_sig_by_day(close: np.ndarray):
-    """Walk-forward signal per daily index d (using labels up to d, state=lab[d]).
-    signal = P[state,Bull]-P[state,Bear]. Returns array aligned to daily bars."""
+    """Walk-forward signal per daily index d (labels up to d, state=lab[d]).
+    signal = P[state,Bull]-P[state,Bear]. INCREMENTAL counting -> O(n)."""
     lab = label_regimes(close); n = len(lab); sig = np.full(n, np.nan)
-    for d in range(MK_MIN, n):
-        P = transition_matrix(lab[:d+1])             # transitions among days 0..d (all completed)
-        st = lab[d]
-        sig[d] = P[st, 2] - P[st, 0]
+    counts = np.zeros((3, 3))
+    for d in range(1, n):
+        counts[lab[d-1], lab[d]] += 1                # transition into day d
+        if d >= MK_MIN:
+            row = counts[lab[d]]; tot = row.sum()
+            if tot > 0:
+                sig[d] = (row[2] - row[0]) / tot
     return sig
 
 
