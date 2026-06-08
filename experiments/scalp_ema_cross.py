@@ -30,6 +30,22 @@ COMMODITY = {"PAXG","XAUT","WBTC","WBETH","BETH"}
 
 def ms(s): return int(pd.Timestamp(s, tz="UTC").timestamp()*1000)
 def ema(a, n): return pd.Series(a).ewm(span=n, adjust=False).mean().to_numpy()
+def macd_line(c): return ema(c, 12) - ema(c, 26)
+
+
+def frame_macd(df5, rule):
+    g = df5.set_index(pd.to_datetime(df5["time"], unit="ms"))
+    s = g["close"].resample(rule).last().dropna()
+    if len(s) < 30:
+        return None, None
+    return macd_line(s.to_numpy()), np.array([ts.value // 10**6 for ts in s.index])
+
+
+def rising_at(m, start, ent_t):
+    if m is None:
+        return False
+    ci = np.searchsorted(start, ent_t, side="right") - 1; j = ci - 1
+    return j >= 1 and m[j] > m[j-1]
 
 
 def excluded(sym):
@@ -99,6 +115,8 @@ def main():
         t5 = df5["time"].to_numpy(); c5 = df5["close"].to_numpy(float)
         h5 = df5["high"].to_numpy(float); l5 = df5["low"].to_numpy(float)
         E = {p: ema(c5, p) for p in EMAS}
+        m15, s15 = frame_macd(df5, "15min"); m1h, s1h = frame_macd(df5, "1h")
+        m4h, s4h = frame_macd(df5, "4h"); m1d, s1d = frame_macd(df5, "1D")
         dtt, trail = cand[c]; n = len(c5)
         outcome = {}                  # bar i -> (ent_t, xt, ret) cached
         def out(i):
@@ -106,6 +124,9 @@ def main():
                 return outcome[i]
             ent_t = int(t5[i]); di = np.searchsorted(dtt, ent_t, side="right") - 1
             if di < 0 or not (VLO < trail[di] < VHI):
+                outcome[i] = None; return None
+            if not (rising_at(m15, s15, ent_t) and rising_at(m1h, s1h, ent_t)    # big-frame filter
+                    and rising_at(m4h, s4h, ent_t) and rising_at(m1d, s1d, ent_t)):
                 outcome[i] = None; return None
             P0 = c5[i]; tp = P0*(1+TP); sl = P0*(1-SL); ret = None; xt = ent_t
             end = min(i+1+MAXHOLD, n)
