@@ -5,7 +5,7 @@ import sys, time, numpy as np, pandas as pd
 from concurrent.futures import ThreadPoolExecutor
 sys.path.insert(0,".")
 from binance_sim import hires_data as HR
-S,E="2024-06-01","2025-06-01"; PERIOD=7200; COST=0.20; BUF=0.05
+S,E="2024-06-01","2025-06-01"; PERIOD=7200; COST=0.20; BUF=0.10
 COINS=["BTCUSDT","ETHUSDT","SOLUSDT","BNBUSDT","XRPUSDT","DOGEUSDT","ADAUSDT","AVAXUSDT",
 "LINKUSDT","DOTUSDT","LTCUSDT","TRXUSDT","NEARUSDT","APTUSDT","ARBUSDT","OPUSDT","INJUSDT",
 "SUIUSDT","SEIUSDT","TIAUSDT","FILUSDT","ATOMUSDT","UNIUSDT","AAVEUSDT","RUNEUSDT","ALGOUSDT",
@@ -37,7 +37,7 @@ for c in COINS:
     res.append((c,(eq-1)*100,bh,len(tr),wr))
 Sx=np.array([x[1] for x in res]); Bx=np.array([x[2] for x in res])
 print(f"عملات مُختبَرة: {len(res)}\n")
-print("##### الاستراتيجية (EMA7200 + دخول +5%) #####")
+print("##### الاستراتيجية (EMA7200 + دخول +10%) #####")
 print(f"  متوسط العائد/عملة: {Sx.mean():+.0f}%   الوسيط: {np.median(Sx):+.0f}%")
 print(f"  عملات رابحة: {(Sx>0).mean()*100:.0f}%   تتفوّق على الاحتفاظ: {(Sx>Bx).mean()*100:.0f}%")
 print("##### الاحتفاظ #####")
