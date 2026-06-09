@@ -19,7 +19,8 @@ from backtest.engine import Symbol4H
 import backtest.strategy_core as S
 
 MS_15M = 15 * 60 * 1000
-FEE = S.EFFECTIVE_FEE_BINANCE          # 0.075%/جهة
+TAKER_FEE = S.EFFECTIVE_FEE_BINANCE    # 0.075%/جهة (أمر سوق)
+MAKER_FEE = 0.0002                     # 0.02%/جهة (أمر Limit) — السكالبرز الحقيقيون
 BARS_PER_DAY = 96                      # 15m
 TRAIN_YEARS = (2023, 2024)
 TEST_YEAR = 2025
@@ -147,22 +148,21 @@ def run_intraday(idata, year, p, start_capital=5000.0):
             pos = positions[s]
             hi = b.high[i]; lo = b.low[i]; cl = b.close[i]
             ep = pos['entry']
-            exit_px = None
-            # SL أولاً (تحفّظ)
+            exit_px = None; exit_fee = TAKER_FEE
+            # SL أولاً (تحفّظ) — أمر سوق = taker
             if lo <= ep * (1 + sl):
-                exit_px = ep * (1 + sl)
+                exit_px = ep * (1 + sl); exit_fee = TAKER_FEE
             elif hi >= ep * (1 + tp):
-                exit_px = ep * (1 + tp)
+                exit_px = ep * (1 + tp); exit_fee = MAKER_FEE   # هدف Limit = maker
             else:
-                # trailing
                 if cl > pos['peak']:
                     pos['peak'] = cl
                 if trail > 0 and cl <= pos['peak'] * (1 - trail):
-                    exit_px = cl
+                    exit_px = cl; exit_fee = TAKER_FEE
                 elif (i - pos['opened_bar']) >= max_hold:
-                    exit_px = cl
+                    exit_px = cl; exit_fee = TAKER_FEE
             if exit_px is not None:
-                proceeds = exit_px * pos['qty'] * (1 - FEE)
+                proceeds = exit_px * pos['qty'] * (1 - exit_fee)
                 liquid += proceeds
                 pnl = (proceeds - pos['cost']) / pos['cost']
                 trades.append(pnl)
@@ -204,7 +204,7 @@ def run_intraday(idata, year, p, start_capital=5000.0):
                 if size < 10:
                     continue
                 qty = size / cl
-                cost = cl * qty * (1 + FEE)
+                cost = cl * qty * (1 + MAKER_FEE)   # دخول Limit = maker
                 if cost > liquid:
                     continue
                 liquid -= cost
@@ -216,7 +216,7 @@ def run_intraday(idata, year, p, start_capital=5000.0):
         for s, pos in positions.items():
             b = bars[s]; i = ptr[s] - 1
             px = b.close[i] if 0 <= i < b.n else pos['entry']
-            mtm += px * pos['qty'] * (1 - FEE)
+            mtm += px * pos["qty"] * (1 - TAKER_FEE)
         equity = mtm
         eq_curve.append(equity)
         day = t // (BARS_PER_DAY * MS_15M)
@@ -231,7 +231,7 @@ def run_intraday(idata, year, p, start_capital=5000.0):
     # تصفية ما تبقّى بسعر الإغلاق الأخير
     for s, pos in positions.items():
         b = bars[s]; i = min(ptr[s] - 1, b.n - 1)
-        proceeds = b.close[i] * pos['qty'] * (1 - FEE)
+        proceeds = b.close[i] * pos["qty"] * (1 - TAKER_FEE)
         liquid += proceeds
         trades.append((proceeds - pos['cost']) / pos['cost'])
     equity = liquid
@@ -282,13 +282,120 @@ def _fmt(year, tag, m):
             f"صفقات={m['trades']} ({m['trades_per_day']:.1f}/يوم) | WR={m['win_rate']:.0f}% | PF={m['pf']:.2f}")
 
 
+# ════════════════════════════════════════════════════════════════════
+#  GA لحظي — يبحث في آلاف التركيبات (لا حدس)
+# ════════════════════════════════════════════════════════════════════
+import random as _rnd
+
+ISPACE = {
+    'entry':     ['breakout', 'revert'],
+    'lookback':  [10, 20, 30, 40, 60],
+    'rsi_min':   [50, 55, 60, 65, 70],
+    'rsi_os':    [20, 25, 30, 35],
+    'vol_mult':  [1.0, 1.5, 2.0, 3.0],
+    'sl':        [-0.005, -0.008, -0.012, -0.02, -0.03],
+    'tp':        [0.008, 0.012, 0.02, 0.03, 0.05],
+    'trail':     [0.0, 0.005, 0.008, 0.015, 0.025],
+    'max_hold':  [8, 16, 32, 48, 96],
+    'max_pos':   [3, 5, 8],
+    'trend_sma': [0, 100, 200, 400],
+}
+
+
+def _rand():
+    return {k: _rnd.choice(v) for k, v in ISPACE.items()}
+
+
+def _cross(a, b):
+    return {k: (a[k] if _rnd.random() < 0.5 else b[k]) for k in ISPACE}
+
+
+def _mut(g, rate=0.25):
+    g = dict(g)
+    for k in ISPACE:
+        if _rnd.random() < rate:
+            g[k] = _rnd.choice(ISPACE[k])
+    return g
+
+
+def _ifit(idata, g, cache):
+    key = json.dumps(g, sort_keys=True)
+    if key in cache:
+        return cache[key]
+    yr = {y: run_intraday(idata, y, g) for y in TRAIN_YEARS}
+    mo = [yr[y]['monthly_pct'] for y in TRAIN_YEARS]
+    dd = min(yr[y]['maxdd'] for y in TRAIN_YEARS)
+    tr = min(yr[y]['trades'] for y in TRAIN_YEARS)
+    if tr < 20:                              # يحتاج نشاطاً معقولاً
+        fit = -100 + tr
+    else:
+        fit = 0.7 * float(np.mean(mo)) + 0.3 * float(np.min(mo))
+        fit -= max(0.0, (-dd - 35.0)) * 0.5  # حارس تراجع
+    res = {'fit': fit, 'train': yr}
+    cache[key] = res
+    return res
+
+
+def run_iga(idata, pop=16, gens=25, elite=3, patience=8, seed=7):
+    _rnd.seed(seed); np.random.seed(seed)
+    cache = {}
+    popu = [_rand() for _ in range(pop)]
+    best = None; noimp = 0
+    for gen in range(gens):
+        scored = sorted(((g, _ifit(idata, g, cache)) for g in popu),
+                        key=lambda x: x[1]['fit'], reverse=True)
+        bg, br = scored[0]
+        if best is None or br['fit'] > best[1]['fit'] + 1e-9:
+            best = (bg, br); noimp = 0
+        else:
+            noimp += 1
+        mo = [br['train'][y]['monthly_pct'] for y in TRAIN_YEARS]
+        da = [br['train'][y]['daily_comp_pct'] for y in TRAIN_YEARS]
+        tpd = np.mean([br['train'][y]['trades_per_day'] for y in TRAIN_YEARS])
+        log(f"[جيل {gen+1}/{gens}] لياقة={br['fit']:.2f} (ثبات {noimp}) | "
+            f"≈{np.mean(mo):+.1f}%/شهر ≈{np.mean(da):+.2f}%/يوم | "
+            f"{tpd:.1f}صفقة/يوم | {bg['entry']},sma{bg['trend_sma']},tp{bg['tp']},sl{bg['sl']},mp{bg['max_pos']}")
+        try:
+            with open('backtest/output/iga_best.json', 'w', encoding='utf-8') as f:
+                json.dump({'genome': best[0], 'train': best[1]['train']}, f,
+                          ensure_ascii=False, indent=2, default=str)
+        except Exception:
+            pass
+        if noimp >= patience:
+            log(f"⏹️ توقّف: ثبات {patience} أجيال."); break
+        nxt = [g for g, _ in scored[:elite]]
+        while len(nxt) < pop - 2:
+            a = min(_rnd.sample(scored, 3), key=lambda x: -x[1]['fit'])[0]
+            b = min(_rnd.sample(scored, 3), key=lambda x: -x[1]['fit'])[0]
+            nxt.append(_mut(_cross(a, b)))
+        nxt += [_rand(), _rand()]
+        popu = nxt
+    return best
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--top', type=int, default=60)
     ap.add_argument('--year', type=int, default=0, help='0 = كل السنوات')
+    ap.add_argument('--ga', action='store_true')
+    ap.add_argument('--pop', type=int, default=16)
+    ap.add_argument('--gen', type=int, default=25)
     args = ap.parse_args()
     t0 = time.time()
     idata = IntradayData(top_n=args.top)
+    if args.ga:
+        log(f"\nGA لحظي: maker={MAKER_FEE*100:.3f}% taker={TAKER_FEE*100:.3f}% | top={args.top}")
+        log("-" * 70)
+        best_g, best_r = run_iga(idata, pop=args.pop, gens=args.gen)
+        log("\n" + "=" * 70)
+        log("أفضل تركيبة لحظية: " + json.dumps(best_g, ensure_ascii=False))
+        for y in [2023, 2024]:
+            log(_fmt(y, 'train', best_r['train'][y]))
+        tm = run_intraday(idata, TEST_YEAR, best_g)
+        log(_fmt(TEST_YEAR, 'TEST', tm))
+        log("=" * 70)
+        log(f"⏱️ {(time.time()-t0)/60:.1f}د")
+        return
     p = dict(DEFAULT)
     log("\nتركيبة افتراضية: " + json.dumps(p, ensure_ascii=False))
     log("-" * 70)
