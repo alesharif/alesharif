@@ -10,3 +10,7 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+
+# GA volatile run logs/checkpoints (النتائج النهائية تُحفظ في ga_best.json)
+backtest/output/*.log
+backtest/output/ga_checkpoint.json
