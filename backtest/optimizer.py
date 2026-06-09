@@ -30,7 +30,10 @@ from .engine import Backtester, Symbol4H, SymbolDaily, PLATFORM
 # ═══════════════════════════════════════════════════════════════════
 # فضاء البحث (الجينات)
 # ═══════════════════════════════════════════════════════════════════
+TF_LIST = ['2h', '4h', '6h', '12h', '1d']   # أطر الإشارة (1h مُسقط على كامل العملات لثقله)
+
 SPACE = {
+    'signal_tf':         list(TF_LIST),
     'entry_mode':        ['breakout', 'breakout_rs', 'divergence'],
     'breakout_lookback': [10, 15, 20, 30, 40],
     'breakout_mom':      [5, 10, 15, 20],
@@ -75,7 +78,7 @@ class Bundle:
         self.s4_start = datetime(2022, 10, 1, tzinfo=timezone.utc)
         self.d_start = datetime(2022, 4, 1, tzinfo=timezone.utc)
         self.end = datetime(2026, 1, 1, tzinfo=timezone.utc)
-        self.data4h = {}
+        self.tf_data = {tf: {} for tf in TF_LIST}   # tf -> {sym: Symbol4H}
         self.daily = {}
         self.k15 = {}
         self._k15_loaded = {}
@@ -84,27 +87,27 @@ class Bundle:
         self.stable_times, self.stable_ratio = self._build_stable()
 
     def _load(self, workers):
-        self.log(f"تحميل بيانات واسعة لـ {len(self.req_universe)} عملة (مرة واحدة)...")
+        self.log(f"تحميل {len(TF_LIST)} أطر لـ {len(self.req_universe)} عملة (مرة واحدة)...")
 
-        def load4h(sym):
-            df = data.get_klines_df(sym, '4h', self.s4_start, self.end)
-            return sym, df
+        def loadtf(sym, tf):
+            return sym, tf, data.get_klines_df(sym, tf, self.s4_start, self.end)
 
         def loadd(sym):
-            df = data.get_klines_df(sym, '1d', self.d_start, self.end)
-            return sym, df
+            return sym, data.get_klines_df(sym, '1d', self.d_start, self.end)
 
-        done = 0
-        with ThreadPoolExecutor(max_workers=workers) as ex:
-            for fut in as_completed({ex.submit(load4h, s): s for s in self.req_universe}):
-                sym, df = fut.result()
-                if df is not None and len(df) >= 50:
-                    self.data4h[sym] = Symbol4H(sym, df)
-                done += 1
-                if done % 40 == 0:
-                    self.log(f"  4h: {done}/{len(self.req_universe)}")
-        self.universe = [s for s in self.req_universe if s in self.data4h]
-        done = 0
+        # نحمّل كل (عملة، إطار) — البيانات اليومية للفلاتر تبقى منفصلة
+        for tf in TF_LIST:
+            done = 0
+            with ThreadPoolExecutor(max_workers=workers) as ex:
+                futs = {ex.submit(loadtf, s, tf): s for s in self.req_universe}
+                for fut in as_completed(futs):
+                    sym, _tf, df = fut.result()
+                    if df is not None and len(df) >= 50:
+                        self.tf_data[_tf][sym] = Symbol4H(sym, df)
+                    done += 1
+            self.log(f"  {tf}: {len(self.tf_data[tf])} عملة")
+        # العملات التي لها 4h على الأقل = الكون المرجعي
+        self.universe = [s for s in self.req_universe if s in self.tf_data['4h']]
         with ThreadPoolExecutor(max_workers=workers) as ex:
             for fut in as_completed({ex.submit(loadd, s): s for s in self.universe}):
                 sym, df = fut.result()
@@ -112,8 +115,7 @@ class Bundle:
                     self.daily[sym] = SymbolDaily(sym, df)
                 else:
                     self._daily_missing.add(sym)
-                done += 1
-        self.log(f"جاهز: 4h={len(self.data4h)} | daily={len(self.daily)} عملة.")
+        self.log(f"جاهز: daily={len(self.daily)} | universe={len(self.universe)} عملة.")
 
     def _build_stable(self):
         pairs = ['USDCUSDT', 'FDUSDUSDT', 'TUSDUSDT', 'DAIUSDT']
@@ -178,15 +180,23 @@ def _maxdd(equity_log, capital):
 
 def evaluate_year(bundle, year, g):
     """يقيّم جينوم على سنة. يعيد dict(metrics) مع reuse للبيانات."""
+    tf = g.get('signal_tf', '4h')
+    tf_dict = bundle.tf_data.get(tf, bundle.tf_data['4h'])
     bt = Backtester(start_capital=CAPITAL, year=year,
                     universe=list(bundle.universe), verbose=False)
-    # حقن البيانات (تخطّي التحميل)
-    bt.data4h = bundle.data4h
+    # حقن البيانات (تخطّي التحميل) — بيانات إطار الإشارة المختار
+    bt.data4h = tf_dict
+    bt.signal_tf = tf
+    bt.ms_sig, bt.bars_24h = E.tf_params(tf)
     bt.daily = bundle.daily
     bt._daily_missing = bundle._daily_missing
     bt.k15 = bundle.k15
     bt._k15_loaded = bundle._k15_loaded
-    bt.universe = bundle.universe
+    # الكون = عملات لها بيانات في هذا الإطار (مع ضمان BTC للقوة النسبية)
+    uni = [s for s in bundle.universe if s in tf_dict]
+    if 'BTCUSDT' in tf_dict and 'BTCUSDT' not in uni:
+        uni.append('BTCUSDT')
+    bt.universe = uni
     bt.stable_times = bundle.stable_times
     bt.stable_ratio = bundle.stable_ratio
     apply_genome(bt, g)
@@ -259,10 +269,19 @@ def _checkpoint(best_overall, gen, gens):
         pass
 
 
-def run_ga(bundle, pop_size=14, gens=6, elite=3, log=print):
+def _target_met(r, target_ret, target_dd):
+    """الهدف: كل سنوات التدريب ≥ target_ret% وأسوأ تراجع ≥ -target_dd%."""
+    rets = [r['train'][y]['return_pct'] for y in TRAIN_YEARS]
+    dds = [r['train'][y]['maxdd'] for y in TRAIN_YEARS]
+    return min(rets) >= target_ret and min(dds) >= -target_dd
+
+
+def run_ga(bundle, pop_size=14, gens=30, elite=3, patience=8,
+           target_ret=35.0, target_dd=30.0, log=print):
     cache = {}
     pop = [rand_genome() for _ in range(pop_size)]
     best_overall = None
+    no_improve = 0
     for gen in range(gens):
         scored = []
         for g in pop:
@@ -270,20 +289,32 @@ def run_ga(bundle, pop_size=14, gens=6, elite=3, log=print):
             scored.append((g, r))
         scored.sort(key=lambda x: x[1]['fit'], reverse=True)
         best_g, best_r = scored[0]
-        if best_overall is None or best_r['fit'] > best_overall[1]['fit']:
+        improved = best_overall is None or best_r['fit'] > best_overall[1]['fit'] + 1e-6
+        if improved:
             best_overall = (best_g, best_r)
+            no_improve = 0
+        else:
+            no_improve += 1
         sh = [best_r['train'][y]['sharpe'] for y in TRAIN_YEARS]
         rt = [best_r['train'][y]['return_pct'] for y in TRAIN_YEARS]
-        log(f"[جيل {gen+1}/{gens}] أفضل لياقة={best_r['fit']:.3f} | "
-            f"Sharpe(23,24)=({sh[0]:.2f},{sh[1]:.2f}) | "
-            f"عائد=({rt[0]:+.0f}%,{rt[1]:+.0f}%) | genome={_short(best_g)}", flush=True)
+        log(f"[جيل {gen+1}/{gens}] لياقة={best_r['fit']:.3f} (ثبات {no_improve}) | "
+            f"Sharpe={tuple(round(x,2) for x in sh)} | "
+            f"عائد=({rt[0]:+.0f}%,{rt[1]:+.0f}%) | tf={best_g['signal_tf']} | {_short(best_g)}", flush=True)
         _checkpoint(best_overall, gen + 1, gens)
-        # الجيل التالي: نخبة + نسل
+        # شرط الإيقاف: بلوغ الهدف أو ثبات طويل
+        if _target_met(best_overall[1], target_ret, target_dd):
+            log(f"🎯 بلوغ الهدف عند الجيل {gen+1}! (كل سنوات التدريب ≥{target_ret}%)", flush=True)
+            break
+        if no_improve >= patience:
+            log(f"⏹️ توقّف: لا تحسّن منذ {patience} أجيال (تقارب).", flush=True)
+            break
+        # الجيل التالي: نخبة + نسل + دم جديد (تنويع)
         nxt = [g for g, _ in scored[:elite]]
         ps = scored
-        while len(nxt) < pop_size:
+        while len(nxt) < pop_size - 2:
             child = mutate(crossover(tournament(ps), tournament(ps)))
             nxt.append(child)
+        nxt += [rand_genome(), rand_genome()]   # حقن عشوائي لتجنّب التقارب المبكر
         pop = nxt
     return best_overall, cache
 
@@ -298,16 +329,22 @@ def _short(g):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--pop', type=int, default=14)
-    ap.add_argument('--gen', type=int, default=6)
+    ap.add_argument('--pop', type=int, default=16)
+    ap.add_argument('--gen', type=int, default=40)
     ap.add_argument('--cap', type=int, default=140)
+    ap.add_argument('--patience', type=int, default=10)
+    ap.add_argument('--target-ret', type=float, default=35.0)
+    ap.add_argument('--target-dd', type=float, default=30.0)
     ap.add_argument('--seed', type=int, default=42)
     args = ap.parse_args()
     random.seed(args.seed); np.random.seed(args.seed)
     t0 = time.time()
 
     bundle = Bundle(cap=args.cap, workers=8)
-    (best_g, best_r), cache = run_ga(bundle, args.pop, args.gen)
+    (best_g, best_r), cache = run_ga(bundle, args.pop, args.gen,
+                                     patience=args.patience,
+                                     target_ret=args.target_ret,
+                                     target_dd=args.target_dd)
 
     print("\n" + "=" * 60)
     print("أفضل جينوم (مُحسّن على 2023+2024):")

@@ -28,6 +28,15 @@ MS_4H = 4 * 3600 * 1000
 MS_15M = 15 * 60 * 1000
 MS_DAY = 24 * 3600 * 1000
 
+# أطر الإشارة المدعومة (للمُحسّن متعدد الأطر) → (ms, عدد شموع 24 ساعة)
+TF_MS = {'1h': 3600_000, '2h': 7200_000, '4h': 14400_000,
+         '6h': 21600_000, '12h': 43200_000, '1d': 86400_000}
+
+
+def tf_params(tf):
+    ms = TF_MS.get(tf, MS_4H)
+    return ms, max(1, round(MS_DAY / ms))
+
 PLATFORM = 'binance'
 FEE = S.EFFECTIVE_FEE_BINANCE
 
@@ -361,6 +370,10 @@ class Backtester:
         self.stable_ratio = None
         self.stable_threshold = 1.15
         self.fear_block_threshold = None   # إن لم يكن None: امنع الدخول عند الخوف
+        # إطار الإشارة (متغيّر — للمُحسّن متعدد الأطر)
+        self.signal_tf = '4h'
+        self.ms_sig = MS_4H
+        self.bars_24h = 6                  # عدد شموع الإطار = 24 ساعة
 
     # ─── log ───
     def _log(self, msg):
@@ -526,7 +539,8 @@ class Backtester:
         """يقيّم عملة لجانب محدّد ('long'/'short') ويعيد candidate أو None."""
         win_n = min(ei + 1, 200)
         # vol_24h
-        vol_24h = float(s4.quote_volume[ei - 6:ei].sum()) if ei >= 6 else float(s4.quote_volume[:ei].sum())
+        nb = self.bars_24h
+        vol_24h = float(s4.quote_volume[ei - nb:ei].sum()) if ei >= nb else float(s4.quote_volume[:ei].sum())
         if vol_24h < S.MIN_VOLUME_BINANCE:
             return None
         # ─── الإشارة ───
@@ -798,7 +812,7 @@ class Backtester:
             # 1) إدارة الخروج كل 15m
             self.manage_exits(t)
             # 2) المسح كل 4h (فقط ضمن السنة)
-            if t < scan_end and (t % MS_4H == 0):
+            if t < scan_end and (t % self.ms_sig == 0):
                 if len(ps['open_positions']) < S.MAX_OPEN_POSITIONS:
                     cands = self.scan(t)
                     if cands:
