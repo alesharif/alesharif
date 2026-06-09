@@ -247,6 +247,18 @@ def tournament(pop_scored, k=3):
     return max(random.sample(pop_scored, k), key=lambda x: x[1]['fit'])[0]
 
 
+def _checkpoint(best_overall, gen, gens):
+    g, r = best_overall
+    out = {'genome': g, 'generation': f'{gen}/{gens}',
+           'train': {str(y): r['train'][y] for y in TRAIN_YEARS},
+           'fit': r['fit'], 'ts': datetime.now(timezone.utc).isoformat()}
+    try:
+        with open('backtest/output/ga_checkpoint.json', 'w', encoding='utf-8') as f:
+            json.dump(out, f, ensure_ascii=False, indent=2, default=str)
+    except Exception:
+        pass
+
+
 def run_ga(bundle, pop_size=14, gens=6, elite=3, log=print):
     cache = {}
     pop = [rand_genome() for _ in range(pop_size)]
@@ -265,6 +277,7 @@ def run_ga(bundle, pop_size=14, gens=6, elite=3, log=print):
         log(f"[جيل {gen+1}/{gens}] أفضل لياقة={best_r['fit']:.3f} | "
             f"Sharpe(23,24)=({sh[0]:.2f},{sh[1]:.2f}) | "
             f"عائد=({rt[0]:+.0f}%,{rt[1]:+.0f}%) | genome={_short(best_g)}", flush=True)
+        _checkpoint(best_overall, gen + 1, gens)
         # الجيل التالي: نخبة + نسل
         nxt = [g for g, _ in scored[:elite]]
         ps = scored
