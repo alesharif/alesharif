@@ -1,0 +1,45 @@
+{
+  "genome": {
+    "entry_mode": "breakout_rs",
+    "breakout_lookback": 30,
+    "breakout_mom": 20,
+    "rs_lookback": 30,
+    "rs_margin": 0.05,
+    "quality": true,
+    "atr_ratio_min": 0.02,
+    "adx_min": 40,
+    "sl": -0.05,
+    "tp": 0.15,
+    "trail_act": 0.05,
+    "trail_ratio": 0.985,
+    "early_exit": false,
+    "fear": 1.1,
+    "max_pos": 5
+  },
+  "train": {
+    "2023": {
+      "sharpe": 1.6086763722767188,
+      "return_pct": 67.55925958663617,
+      "pf": 1.3495208907139151,
+      "maxdd": -10.811958627244062,
+      "trades": 140
+    },
+    "2024": {
+      "sharpe": 0.08383664950497237,
+      "return_pct": -1.194625470728988,
+      "pf": 0.9922243554056597,
+      "maxdd": -26.240376537256658,
+      "trades": 146
+    }
+  },
+  "test_2025": {
+    "sharpe": 0.9228538166274785,
+    "return_pct": 26.522842787885658,
+    "pf": 1.1917065041118224,
+    "maxdd": -24.021776777016346,
+    "trades": 121
+  },
+  "evals": 66,
+  "elapsed_min": 18.095151789983113,
+  "note": "عيّنة محدودة للبحث — يجب إعادة التحقّق على كامل العملات"
+}
