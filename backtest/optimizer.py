@@ -43,12 +43,12 @@ SPACE = {
     'atr_ratio_min':     [0.02, 0.03, 0.05, 0.07],
     'adx_min':           [20, 25, 30, 40, 50],
     'sl':                [-0.02, -0.025, -0.03, -0.04, -0.05],
-    'tp':                [0.06, 0.10, 0.15, 0.20],
+    'tp':                [0.06, 0.10, 0.15, 0.20, 0.25, 0.30],
     'trail_act':         [0.02, 0.03, 0.05],
     'trail_ratio':       [0.97, 0.98, 0.985],
     'early_exit':        [True, False],
     'fear':              [None, 1.10, 1.15, 1.30],
-    'max_pos':           [3, 5, 8],
+    'max_pos':           [3, 5, 8, 12, 16],
 }
 
 TRAIN_YEARS = [2023, 2024]
@@ -214,6 +214,18 @@ def evaluate_year(bundle, year, g):
     }
 
 
+OBJECTIVE = 'sharpe'   # 'sharpe' (متّسق منخفض المخاطرة) أو 'return' (تعظيم العائد/Calmar)
+
+
+def to_daily(annual_pct):
+    """عائد سنوي% → متوسط يومي% مركّب (365 يوماً)."""
+    return ((1.0 + annual_pct / 100.0) ** (1.0 / 365.0) - 1.0) * 100.0
+
+
+def to_monthly(annual_pct):
+    return ((1.0 + annual_pct / 100.0) ** (1.0 / 12.0) - 1.0) * 100.0
+
+
 def fitness(bundle, g, cache):
     key = json.dumps(g, sort_keys=True)
     if key in cache:
@@ -222,13 +234,20 @@ def fitness(bundle, g, cache):
     for y in TRAIN_YEARS:
         yr[y] = evaluate_year(bundle, y, g)
     sh = [yr[y]['sharpe'] for y in TRAIN_YEARS]
+    rt = [yr[y]['return_pct'] for y in TRAIN_YEARS]
     tr = [yr[y]['trades'] for y in TRAIN_YEARS]
     dd = min(yr[y]['maxdd'] for y in TRAIN_YEARS)  # الأسوأ (أكثر سلبية)
     if min(tr) < MIN_TRADES:
-        fit = -5.0 + min(tr) * 0.01           # يوجّه GA بعيداً عن "لا تداول"
+        fit = -50.0 + min(tr) * 0.01           # يوجّه GA بعيداً عن "لا تداول"
+    elif OBJECTIVE == 'return':
+        # تعظيم متوسط العائد الشهري مع حارس تراجع (Calmar-style)
+        m_avg = float(np.mean([to_monthly(r) for r in rt]))
+        m_min = float(np.min([to_monthly(r) for r in rt]))
+        fit = 0.7 * m_avg + 0.3 * m_min          # كافئ العائد، اطلب اتّساقاً جزئياً
+        fit -= max(0.0, (-dd - 40.0)) * 0.5      # عقوبة تراجع فقط بعد -40% (عدواني)
     else:
         fit = float(np.mean(sh)) - 0.5 * float(np.std(sh))   # Sharpe متّسق
-        fit -= max(0.0, (-dd - 20.0)) * 0.05                  # عقوبة تراجع قوية >20% (هدف: أقل مخاطرة)
+        fit -= max(0.0, (-dd - 20.0)) * 0.05                  # عقوبة تراجع قوية >20%
     res = {'fit': fit, 'train': yr}
     cache[key] = res
     return res
@@ -270,10 +289,14 @@ def _checkpoint(best_overall, gen, gens):
 
 
 def _target_met(r, target_ret, target_dd):
-    """الهدف: كل سنوات التدريب ≥ target_ret% وأسوأ تراجع ≥ -target_dd%."""
+    """الهدف: في وضع العائد = متوسط شهري ≥ target_ret%؛ غير ذلك = كل سنة ≥ target_ret%."""
     rets = [r['train'][y]['return_pct'] for y in TRAIN_YEARS]
     dds = [r['train'][y]['maxdd'] for y in TRAIN_YEARS]
-    return min(rets) >= target_ret and min(dds) >= -target_dd
+    if min(dds) < -target_dd:
+        return False
+    if OBJECTIVE == 'return':
+        return float(np.mean([to_monthly(x) for x in rets])) >= target_ret
+    return min(rets) >= target_ret
 
 
 def run_ga(bundle, pop_size=14, gens=30, elite=3, patience=8,
@@ -297,9 +320,11 @@ def run_ga(bundle, pop_size=14, gens=30, elite=3, patience=8,
             no_improve += 1
         sh = [best_r['train'][y]['sharpe'] for y in TRAIN_YEARS]
         rt = [best_r['train'][y]['return_pct'] for y in TRAIN_YEARS]
+        mo = float(np.mean([to_monthly(x) for x in rt]))
+        da = float(np.mean([to_daily(x) for x in rt]))
         log(f"[جيل {gen+1}/{gens}] لياقة={best_r['fit']:.3f} (ثبات {no_improve}) | "
-            f"Sharpe={tuple(round(x,2) for x in sh)} | "
-            f"عائد=({rt[0]:+.0f}%,{rt[1]:+.0f}%) | tf={best_g['signal_tf']} | {_short(best_g)}", flush=True)
+            f"عائد=({rt[0]:+.0f}%,{rt[1]:+.0f}%) ≈{mo:+.1f}%/شهر ≈{da:+.2f}%/يوم | "
+            f"Sharpe={tuple(round(x,2) for x in sh)} | tf={best_g['signal_tf']} | {_short(best_g)}", flush=True)
         _checkpoint(best_overall, gen + 1, gens)
         # شرط الإيقاف: بلوغ الهدف أو ثبات طويل
         if _target_met(best_overall[1], target_ret, target_dd):
@@ -335,8 +360,12 @@ def main():
     ap.add_argument('--patience', type=int, default=10)
     ap.add_argument('--target-ret', type=float, default=35.0)
     ap.add_argument('--target-dd', type=float, default=30.0)
+    ap.add_argument('--objective', choices=['sharpe', 'return'], default='sharpe')
     ap.add_argument('--seed', type=int, default=42)
     args = ap.parse_args()
+    global OBJECTIVE
+    OBJECTIVE = args.objective
+    print(f"الهدف: {OBJECTIVE} | target={args.target_ret} | target_dd={args.target_dd}", flush=True)
     random.seed(args.seed); np.random.seed(args.seed)
     t0 = time.time()
 
@@ -358,7 +387,8 @@ def main():
     test_m = evaluate_year(bundle, TEST_YEAR, best_g)
     rows.append((TEST_YEAR, 'TEST', test_m))
     for y, tag, m in rows:
-        print(f"  {y} [{tag:5s}] Sharpe={m['sharpe']:+.2f} | عائد={m['return_pct']:+.1f}% | "
+        print(f"  {y} [{tag:5s}] عائد={m['return_pct']:+.1f}% ≈{to_monthly(m['return_pct']):+.1f}%/شهر "
+              f"≈{to_daily(m['return_pct']):+.2f}%/يوم | Sharpe={m['sharpe']:+.2f} | "
               f"PF={m['pf']:.2f} | DD={m['maxdd']:.1f}% | صفقات={m['trades']}")
     print("=" * 60)
     out = {'genome': best_g,
