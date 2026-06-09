@@ -1,0 +1,6 @@
+التحقّق من جينوم GA على كامل العملات:
+{"entry_mode": "breakout_rs", "breakout_lookback": 30, "breakout_mom": 20, "rs_lookback": 30, "rs_margin": 0.05, "quality": true, "atr_ratio_min": 0.02, "adx_min": 40, "sl": -0.05, "tp": 0.15, "trail_act": 0.05, "trail_ratio": 0.985, "early_exit": false, "fear": 1.1, "max_pos": 5}
+  2023 [train] Sharpe=+1.81 | عائد=+175.5% | PF=1.19 | DD=-20.2% | صفقات=544 | WR=52%
+  2024 [train] Sharpe=-0.58 | عائد=-33.9% | PF=0.91 | DD=-64.7% | صفقات=525 | WR=48%
+  2025 [TEST ] Sharpe=+0.56 | عائد=+16.6% | PF=1.05 | DD=-24.9% | صفقات=347 | WR=49%
+=== تم — حُفظ ga_validate_full.json ===
