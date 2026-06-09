@@ -68,7 +68,7 @@ class Bundle:
                 continue
             uni.append(sym)
         # نضمن وجود BTCUSDT (للقوة النسبية) + عيّنة محدودة للسرعة
-        sample = uni[:cap]
+        sample = uni if (cap is None or cap <= 0) else uni[:cap]
         if 'BTCUSDT' not in sample:
             sample = ['BTCUSDT'] + sample[:cap - 1]
         self.req_universe = sample
@@ -218,7 +218,7 @@ def fitness(bundle, g, cache):
         fit = -5.0 + min(tr) * 0.01           # يوجّه GA بعيداً عن "لا تداول"
     else:
         fit = float(np.mean(sh)) - 0.5 * float(np.std(sh))   # Sharpe متّسق
-        fit -= max(0.0, (-dd - 25.0)) * 0.02                  # عقوبة تراجع >25%
+        fit -= max(0.0, (-dd - 20.0)) * 0.05                  # عقوبة تراجع قوية >20% (هدف: أقل مخاطرة)
     res = {'fit': fit, 'train': yr}
     cache[key] = res
     return res
