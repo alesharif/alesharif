@@ -360,6 +360,7 @@ class Backtester:
         self.stable_times = None
         self.stable_ratio = None
         self.stable_threshold = 1.15
+        self.fear_block_threshold = None   # إن لم يكن None: امنع الدخول عند الخوف
 
     # ─── log ───
     def _log(self, msg):
@@ -627,6 +628,14 @@ class Backtester:
         open_symbols = set(ps['open_positions'].keys())
         open_count = len(open_symbols)
         now_sec = t_ms / 1000.0
+        # فلتر الخوف الحاجب (جين اختياري): امنع الدخول عند الخوف
+        if self.fear_block_threshold is not None:
+            old = self.stable_threshold
+            self.stable_threshold = self.fear_block_threshold
+            fearful = self._stable_now(t_ms)
+            self.stable_threshold = old
+            if fearful is True:
+                return []
         btc_ret = self._btc_ret(t_ms) if self.entry_mode == 'breakout_rs' else None
         # تحديد الجوانب المسموحة هذه الدورة
         sides = ['long']
